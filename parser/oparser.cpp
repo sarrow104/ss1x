@@ -823,6 +823,7 @@ namespace ss1x {
         // 注意以下全局变量的构造时机，与代码的先后关系相关！
         const rule char_;
         const rule eof_p    = !parser::char_;
+        const rule utf8_; // TODO
 
         const rule line_begin_p = make_by_type(rule::RULE_ANCHOR_LINE_BEGIN);
         const rule line_end_p   = make_by_type(rule::RULE_ANCHOR_LINE_END);
@@ -843,7 +844,7 @@ namespace ss1x {
             .result(std::function<std::string(StrIterator,StrIterator)>(&util::slice2string));
 
         const rule double_p
-            = (char_set_p("+-") || +digit_p || (char_p('.') >> +digit_p || char_set_p("eE") >> +digit_p))
+            = (-char_set_p("+-") >> (+digit_p || (char_p('.') >> +digit_p || (char_set_p("eE") >> +digit_p))))
             .result(std::function<double(StrIterator,StrIterator)>(&util::slice2double));
 
         // 如何自动避开某些规则，skip动作？
