@@ -51,6 +51,11 @@ const ss1x::parser::rule& get_port_p()
     return port_p;
 }
 
+// split(`http://192.168.1.7/`)
+//   protocl = `http`
+//   domain = `192.168.1.7`
+//   port = `0`
+//   command = `/`
 std::tuple<std::string, std::string, int, std::string> split(const std::string& url)
 {
     std::tuple<std::string, std::string, int, std::string> ret;
