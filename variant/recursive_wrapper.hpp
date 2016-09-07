@@ -15,21 +15,15 @@
 #include <cassert>
 #include <utility>
 
-namespace mapbox { namespace util {
+namespace mapbox {
+namespace util {
 
 template <typename T>
-class recursive_wrapper
-{
-
+class recursive_wrapper {
     T* p_;
 
-    void assign(T const& rhs)
-    {
-        this->get() = rhs;
-    }
-
+    void assign(T const& rhs) { this->get() = rhs; }
 public:
-
     using type = T;
 
     /**
@@ -41,57 +35,53 @@ public:
      *         of type T.
      * @throws any exception thrown by the default constructur of T.
      */
-    recursive_wrapper() : p_(new T) {};
+    recursive_wrapper() : p_(new T){};
 
     ~recursive_wrapper() noexcept { delete p_; };
-
     recursive_wrapper(recursive_wrapper const& operand)
-        : p_(new T(operand.get())) {}
+        : p_(new T(operand.get()))
+    {
+    }
 
-    recursive_wrapper(T const& operand)
-        : p_(new T(operand)) {}
-
-    recursive_wrapper(recursive_wrapper && operand)
-        : p_(operand.p_)
+    recursive_wrapper(T const& operand) : p_(new T(operand)) {}
+    recursive_wrapper(recursive_wrapper&& operand) : p_(operand.p_)
     {
         operand.p_ = nullptr;
     }
 
-    recursive_wrapper(T && operand)
-        : p_(new T(std::move(operand))) {}
-
-    inline recursive_wrapper & operator=(recursive_wrapper const& rhs)
+    recursive_wrapper(T&& operand) : p_(new T(std::move(operand))) {}
+    inline recursive_wrapper& operator=(recursive_wrapper const& rhs)
     {
         assign(rhs.get());
         return *this;
     }
 
-    inline recursive_wrapper & operator=(T const& rhs)
+    inline recursive_wrapper& operator=(T const& rhs)
     {
         assign(rhs);
         return *this;
     }
 
-    inline void swap(recursive_wrapper & operand) noexcept
+    inline void swap(recursive_wrapper& operand) noexcept
     {
         T* temp = operand.p_;
         operand.p_ = p_;
         p_ = temp;
     }
 
-    recursive_wrapper & operator=(recursive_wrapper && rhs) noexcept
+    recursive_wrapper& operator=(recursive_wrapper&& rhs) noexcept
     {
         swap(rhs);
         return *this;
     }
 
-    recursive_wrapper & operator=(T && rhs)
+    recursive_wrapper& operator=(T&& rhs)
     {
         get() = std::move(rhs);
         return *this;
     }
 
-    T & get()
+    T& get()
     {
         assert(p_);
         return *get_pointer();
@@ -104,21 +94,17 @@ public:
     }
 
     T* get_pointer() { return p_; }
-
     const T* get_pointer() const { return p_; }
-
     operator T const&() const { return this->get(); }
-
-    operator T &() { return this->get(); }
-
-}; // class recursive_wrapper
+    operator T&() { return this->get(); }
+};  // class recursive_wrapper
 
 template <typename T>
-inline void swap(recursive_wrapper<T> & lhs, recursive_wrapper<T> & rhs) noexcept
+inline void swap(recursive_wrapper<T>& lhs, recursive_wrapper<T>& rhs) noexcept
 {
     lhs.swap(rhs);
 }
+}
+}
 
-}}
-
-#endif // MAPBOX_UTIL_RECURSIVE_WRAPPER_HPP
+#endif  // MAPBOX_UTIL_RECURSIVE_WRAPPER_HPP
