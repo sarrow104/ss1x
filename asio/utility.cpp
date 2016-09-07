@@ -2,19 +2,18 @@
 #include <gumbo_query/Node.h>
 #include <gumbo_query/Selection.h>
 
-#include <ss1x/parser/oparser.hpp>
 #include <ss1x/parser/dictionary.hpp>
+#include <ss1x/parser/oparser.hpp>
 
 #include <sss/path.hpp>
 
 #include "utility.hpp"
 
 namespace ss1x {
-    namespace util {
-        namespace url {
+namespace util {
+namespace url {
 
-class protocal_words : public ss1x::parser::KeywordsList
-{
+class protocal_words : public ss1x::parser::KeywordsList {
 public:
     protocal_words()
     {
@@ -29,25 +28,26 @@ const ss1x::parser::rule& get_protocal_p()
 {
     static protocal_words dt;
 
-    static ss1x::parser::rule protocal_p
-        = ss1x::parser::dict_p(dt) >> ss1x::parser::sequence("://");
+    static ss1x::parser::rule protocal_p =
+        ss1x::parser::dict_p(dt) >> ss1x::parser::sequence("://");
 
     return protocal_p;
 }
 
 const ss1x::parser::rule& get_domain_p()
 {
-    static ss1x::parser::rule domain_p
-        = (+(ss1x::parser::alnum_p | ss1x::parser::char_p('-'))
-           % ss1x::parser::char_p('.'))
-        >> &(ss1x::parser::char_p('/') | ss1x::parser::char_p(':'));
+    static ss1x::parser::rule domain_p =
+        (+(ss1x::parser::alnum_p | ss1x::parser::char_p('-')) %
+         ss1x::parser::char_p('.')) >>
+        &(ss1x::parser::char_p('/') | ss1x::parser::char_p(':'));
     return domain_p;
 }
 
 const ss1x::parser::rule& get_port_p()
 {
-    static ss1x::parser::rule port_p
-        = ss1x::parser::char_p(':') >> +ss1x::parser::digit_p >> &ss1x::parser::char_p('/');
+    static ss1x::parser::rule port_p = ss1x::parser::char_p(':') >>
+                                       +ss1x::parser::digit_p >>
+                                       &ss1x::parser::char_p('/');
     return port_p;
 }
 
@@ -56,13 +56,14 @@ const ss1x::parser::rule& get_port_p()
 //   domain = `192.168.1.7`
 //   port = `0`
 //   command = `/`
-std::tuple<std::string, std::string, int, std::string> split(const std::string& url)
+std::tuple<std::string, std::string, int, std::string> split(
+    const std::string& url)
 {
     std::tuple<std::string, std::string, int, std::string> ret;
 
     const ss1x::parser::rule& protocal_p = get_protocal_p();
-    const ss1x::parser::rule& domain_p  = get_domain_p();
-    const ss1x::parser::rule& port_p    = get_port_p();
+    const ss1x::parser::rule& domain_p = get_domain_p();
+    const ss1x::parser::rule& port_p = get_port_p();
 
     typedef std::string::const_iterator StrIterator;
     StrIterator domain_beg = url.begin();
@@ -96,15 +97,15 @@ std::tuple<std::string, std::string, int, std::string> split(const std::string& 
     return ret;
 }
 
-std::string join(const std::tuple<std::string, std::string, int, std::string>& url)
+std::string join(
+    const std::tuple<std::string, std::string, int, std::string>& url)
 {
-    return join(std::get<0>(url),
-                std::get<1>(url),
-                std::get<2>(url),
+    return join(std::get<0>(url), std::get<1>(url), std::get<2>(url),
                 std::get<3>(url));
 }
 
-std::string join(const std::string& protocal, const std::string& domain, int port, const std::string& command)
+std::string join(const std::string& protocal, const std::string& domain,
+                 int port, const std::string& command)
 {
     std::ostringstream oss;
     if (!protocal.empty()) {
@@ -123,13 +124,13 @@ std::string join(const std::string& protocal, const std::string& domain, int por
     return oss.str();
 }
 
-bool        is_absolute(const std::string& url)
+bool is_absolute(const std::string& url)
 {
     typedef std::string::const_iterator StrIterator;
     StrIterator it_beg = url.begin();
     StrIterator it_end = url.end();
     const ss1x::parser::rule& protocal_p = get_protocal_p();
-    
+
     return protocal_p.match(it_beg, it_end);
 }
 
@@ -160,27 +161,27 @@ std::string full_of_copy(const std::string& url, const std::string& referer)
     return url;
 }
 
-
-        } // namespace url
+}  // namespace url
 
 namespace html {
 
-    void queryText(std::ostream& o, const std::string& utf8html, const std::string& css_path)
-    {
-        CDocument doc;
-        doc.parse(utf8html);
-        if (!doc.isOK()) {
-            return;
-        }
-
-        CSelection s = doc.find(css_path);
-
-        for (size_t i = 0; i != s.nodeNum(); ++i ) {
-            CNode n = s.nodeAt(i);
-            o << n.textNeat();
-        }
+void queryText(std::ostream& o, const std::string& utf8html,
+               const std::string& css_path)
+{
+    CDocument doc;
+    doc.parse(utf8html);
+    if (!doc.isOK()) {
+        return;
     }
-    
-} // namespace html
-    } // namespace util
-} // namespace ss1x
+
+    CSelection s = doc.find(css_path);
+
+    for (size_t i = 0; i != s.nodeNum(); ++i) {
+        CNode n = s.nodeAt(i);
+        o << n.textNeat();
+    }
+}
+
+}  // namespace html
+}  // namespace util
+}  // namespace ss1x
