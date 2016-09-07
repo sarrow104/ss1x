@@ -1,22 +1,18 @@
 #include "status.hpp"
 
-#include <sss/utlstring.hpp>
-#include <sss/util/utf8.hpp>
 #include <sss/util/PostionThrow.hpp>
+#include <sss/util/utf8.hpp>
+#include <sss/utlstring.hpp>
 
 #include <sss/log.hpp>
 
-#include <stdexcept>
 #include <algorithm>
+#include <stdexcept>
 
 namespace ss1x {
-    namespace parser {
+namespace parser {
 
-Status::Status(int tabstop)
-    : m_tabstop(tabstop)
-{
-}
-
+Status::Status(int tabstop) : m_tabstop(tabstop) {}
 Status::Status(StrIterator beg, StrIterator end, int tabstop)
     : m_tabstop(tabstop)
 {
@@ -41,7 +37,8 @@ bool Status::init(StrIterator it_beg, StrIterator it_end)
             this->m_begins.push_back(it_beg + 1);
             std::advance(it_beg, 1);
         }
-        else if (std::distance(it_beg, it_end) >= 2 && *it_beg == '\r' && *(it_beg + 1) == '\n') {
+        else if (std::distance(it_beg, it_end) >= 2 && *it_beg == '\r' &&
+                 *(it_beg + 1) == '\n') {
             this->m_ends.push_back(it_beg);
             this->m_begins.push_back(it_beg + 2);
             std::advance(it_beg, 2);
@@ -62,7 +59,7 @@ bool Status::init(StrIterator it_beg, StrIterator it_end)
 //     }
 //     return false;
 // }
-// 
+//
 // bool Status::add_end(StrIterator it)
 // {
 //     if (m_ends.empty() || m_ends.back() < it) {
@@ -91,11 +88,13 @@ std::pair<int, int> Status::calc_coord(StrIterator it) const
     if (this->m_begins.empty()) {
         SSS_POSTION_THROW(std::runtime_error, "empty Status::" << __func__);
     }
-    if (std::distance(m_begins.front(), it) < 0 || std::distance(it, m_ends.back()) < 0) {
+    if (std::distance(m_begins.front(), it) < 0 ||
+        std::distance(it, m_ends.back()) < 0) {
         SSS_POSTION_THROW(std::runtime_error, "it not in Status range");
     }
 
-    // lower_bound 和 upper_bound ，返回的是查找值 v，在递增区间[first, last)之间，
+    // lower_bound 和 upper_bound ，返回的是查找值 v，在递增区间[first,
+    // last)之间，
     // 第一个大于等于 v 和 第一个大于 v 的指针；
     //
     // 而我需要的是，第一个小于等于v的指针！（m_begins中），或者：
@@ -113,5 +112,5 @@ std::pair<int, int> Status::calc_coord(StrIterator it) const
     return std::make_pair(row, col);
 }
 
-    }
-}
+}  // namespace parser
+}  // namespace ss1x

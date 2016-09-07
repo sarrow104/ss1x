@@ -1,23 +1,16 @@
 #include "delayeval.hpp"
 #include "util.hpp"
 
-#include <sss/util/PostionThrow.hpp>
 #include <sss/log.hpp>
+#include <sss/util/PostionThrow.hpp>
 
 #include <stdexcept>
 
 namespace ss1x {
 namespace parser {
 
-delayeval::delayeval()
-    : m_rul_ptr(0)
-{
-}
-
-delayeval::~delayeval()
-{
-}
-
+delayeval::delayeval() : m_rul_ptr(0) {}
+delayeval::~delayeval() {}
 delayeval::delayeval(const delayeval& rhs)
     : m_rul_ptr(rhs.m_rul_ptr),
       m_it_beg(rhs.m_it_beg),
@@ -32,7 +25,7 @@ delayeval::delayeval(const delayeval& rhs)
 //
 // 不过奇怪的是 std::unique_ptr 的拷贝构造，和赋值函数，都是delete状态
 //! /usr/include/c++/4.8/bits/unique_ptr.h|464
-delayeval::delayeval(delayeval && rhs)
+delayeval::delayeval(delayeval&& rhs)
     : m_rul_ptr(rhs.m_rul_ptr),
       m_it_beg(rhs.m_it_beg),
       m_it_end(rhs.m_it_end),
@@ -42,7 +35,7 @@ delayeval::delayeval(delayeval && rhs)
 {
 }
 
-delayeval & delayeval::operator=(delayeval&& rhs)
+delayeval& delayeval::operator=(delayeval&& rhs)
 {
     if (this != &rhs) {
         this->m_rul_ptr = rhs.m_rul_ptr;
@@ -55,16 +48,14 @@ delayeval & delayeval::operator=(delayeval&& rhs)
     return *this;
 }
 
-void    delayeval::eval() const
+void delayeval::eval() const
 {
     if (this->is_init()) {
         SSS_POSTION_THROW(std::runtime_error,
                           "must eval at the root delayeval node");
     }
     for (SubsT::const_iterator it = this->m_subs.cbegin();
-         it != this->m_subs.cend();
-         ++it)
-    {
+         it != this->m_subs.cend(); ++it) {
         it->eval_inner();
     }
 }
@@ -74,11 +65,10 @@ void    delayeval::eval() const
 //
 // 应该是模拟正式匹配，发生的先后顺序……
 // 所以，是深度优先……
-void    delayeval::eval_inner() const
+void delayeval::eval_inner() const
 {
     if (!this->is_init()) {
-        SSS_POSTION_THROW(std::runtime_error,
-                          "current sub node not init!");
+        SSS_POSTION_THROW(std::runtime_error, "current sub node not init!");
     }
 
     if (this->m_action == 0) {
@@ -86,17 +76,15 @@ void    delayeval::eval_inner() const
                           "current sub delayeval has no action!");
     }
     for (SubsT::const_iterator it = this->m_subs.cbegin();
-         it != this->m_subs.cend();
-         ++it)
-    {
+         it != this->m_subs.cend(); ++it) {
         it->eval_inner();
     }
     this->m_action(this->m_it_beg, this->m_it_end, this->m_usr_data);
 }
 
-delayeval& delayeval::assign(const rule * p_rule,
-                             StrIterator it_beg, StrIterator it_end,
-                             rule::ActionT action, rule::matched_value_t usr_data)
+delayeval& delayeval::assign(const rule* p_rule, StrIterator it_beg,
+                             StrIterator it_end, rule::ActionT action,
+                             rule::matched_value_t usr_data)
 {
     this->m_rul_ptr = p_rule;
     this->m_it_beg = it_beg;
@@ -145,7 +133,7 @@ delayeval& delayeval::assign(const rule * p_rule,
 // 直接复用以前的结果；否则新建一个路径；
 // 析构函数，则看当前路径是否匹配成功？如果失败，则将当前路径插入“死路列表”；
 // 同时，将内部的子匹配结果，当做已经成功的部分，插入成功路径列表；
-// 
+//
 // 至于用户的 helper 宏，则注意是帮助用户简写一个立即返回的语句——只要记忆路径
 // 中已经走过，那么把之前的结果立即返回——不管是成功还是失败。
 //
@@ -195,9 +183,9 @@ delayeval& delayeval::assign(const rule * p_rule,
 //
 // 由于递归调用的特点，可以保证不会遗漏子函数生成的对象；——因为子函数，先返回
 // ；
-delayeval& delayeval::push_back(const rule * p_rule,
-                                StrIterator it_beg, StrIterator it_end,
-                                rule::ActionT action, rule::matched_value_t usr_data)
+delayeval& delayeval::push_back(const rule* p_rule, StrIterator it_beg,
+                                StrIterator it_end, rule::ActionT action,
+                                rule::matched_value_t usr_data)
 {
     SSS_LOG_FUNC_TRACE(sss::log::log_DEBUG);
     delayeval tmp;
@@ -214,7 +202,8 @@ delayeval& delayeval::push_back(const delayeval& sub_delay)
     if (sub_delay.m_action == 0) {
         // std::cout << *sub_delay.m_rul_ptr << std::endl;
         std::cout << *sub_delay.m_it_beg << std::endl;
-        std::cout << std::distance(sub_delay.m_it_beg, sub_delay.m_it_end) << std::endl;
+        std::cout << std::distance(sub_delay.m_it_beg, sub_delay.m_it_end)
+                  << std::endl;
         exit(0);
     }
     this->m_subs.push_back(sub_delay);
@@ -228,7 +217,8 @@ delayeval& delayeval::push_back(delayeval&& sub_delay)
     if (sub_delay.m_action == 0) {
         // std::cout << *sub_delay.m_rul_ptr << std::endl;
         std::cout << *sub_delay.m_it_beg << std::endl;
-        std::cout << std::distance(sub_delay.m_it_beg, sub_delay.m_it_end) << std::endl;
+        std::cout << std::distance(sub_delay.m_it_beg, sub_delay.m_it_end)
+                  << std::endl;
         exit(0);
     }
     this->m_subs.push_back(std::move(sub_delay));
@@ -243,5 +233,5 @@ void delayeval::print_userdata(std::ostream& o) const
     o << std::endl;
 }
 
-}
-}
+}  // namespace parser
+}  // namespace ss1x
