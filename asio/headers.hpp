@@ -39,7 +39,8 @@ public:
 
     std::string get(const std::string& key, const std::string& stem) const;
 
-private:
+    unsigned int status_code;
+    std::string  http_version;
 };
 
 inline std::ostream& operator<<(std::ostream& o, const Headers& h)

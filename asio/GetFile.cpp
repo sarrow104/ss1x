@@ -100,7 +100,7 @@ void postFileInner(ss1x::http::Headers* headers, const std::string& serverName,
     std::istream response_stream(&response);
     std::string http_version;
     response_stream >> http_version;
-    unsigned int status_code;
+    unsigned int status_code = 0u;
     response_stream >> status_code;
     std::string status_message;
     std::getline(response_stream, status_message);
@@ -133,6 +133,10 @@ void postFileInner(ss1x::http::Headers* headers, const std::string& serverName,
     oss << "header begin:" << std::endl;
     oss << sss::Terminal::debug.data();
 #endif
+    if (headers) {
+        headers->status_code = status_code;
+        headers->http_version = http_version;
+    }
     while (std::getline(response_stream, header) && header != "\r") {
 #ifdef _ECHO_HTTP_HEADERS
         oss << header << std::endl;
@@ -224,7 +228,7 @@ void getFileInner(std::ostream& outFile, ss1x::http::Headers* headers,
     std::istream response_stream(&response);
     std::string http_version;
     response_stream >> http_version;
-    unsigned int status_code;
+    unsigned int status_code = 0;
     response_stream >> status_code;
     std::string status_message;
     std::getline(response_stream, status_message);
@@ -257,6 +261,10 @@ void getFileInner(std::ostream& outFile, ss1x::http::Headers* headers,
     oss << "header begin:" << std::endl;
     oss << sss::Terminal::debug.data();
 #endif
+    if (headers) {
+        headers->status_code = status_code;
+        headers->http_version = http_version;
+    }
     while (std::getline(response_stream, header) && header != "\r") {
 #ifdef _ECHO_HTTP_HEADERS
         oss << header << std::endl;
