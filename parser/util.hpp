@@ -93,7 +93,7 @@ namespace ss1x {
                 {
                     if (!p_rule) {
                         SSS_POSTION_THROW(std::runtime_error,
-                                          "delayeval_helper::" << __func__ << " null rule * ptr!");
+                                          "delayeval_helper::" , __func__ , " null rule * ptr!");
 
                     }
                     return p_rule->do_match(it_beg, it_end,

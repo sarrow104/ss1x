@@ -86,7 +86,7 @@ std::pair<int, int> Status::calc_coord(StrIterator it) const
     int col = 0;
 
     if (this->m_begins.empty()) {
-        SSS_POSTION_THROW(std::runtime_error, "empty Status::" << __func__);
+        SSS_POSTION_THROW(std::runtime_error, "empty Status::", __func__);
     }
     if (std::distance(m_begins.front(), it) < 0 ||
         std::distance(it, m_ends.back()) < 0) {

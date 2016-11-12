@@ -713,7 +713,7 @@ inline rule range(const rule& ref, int low, int high = -1)
 
     if (high > 0 && high < low) {
         SSS_POSTION_THROW(std::logic_error,
-                          "range high " << high << " less than low " << low);
+                          "range high " , high , " less than low " , low);
     }
     rule ret(rule::RULE_OPERATOR_RANGETIMES);
     ret.m_data.ch_range[0] = low & 0xFF;

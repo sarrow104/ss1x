@@ -606,13 +606,14 @@ bool rule::do_match(StrIterator& it_beg, StrIterator it_end, bool no_action,
                             //    好像对这里没用。
                             //    因为转嫁的是rule::print, -> visitor……
                             // 3. 做一个深度限制。
-                            SSS_POSTION_THROW_3(
+                            SSS_POSTION_ARGS_THROW(
                                 ErrorPosition,
-                                "@" << this->m_subs[i].get_ptr() << " from: "
-                                    << this->get_type_name(this->m_type) << " @"
-                                    << this << "\nleft sample=`"
-                                    << sss::util::make_slice(it_beg, sample_end)
-                                    << "`",
+                                sss::rope_string(
+                                    "@", this->m_subs[i].get_ptr(), " from: ",
+                                    this->get_type_name(this->m_type), " @",
+                                    this, "\nleft sample=`",
+                                    sss::util::make_slice(it_beg, sample_end),
+                                    "`"),
                                 this->m_subs[i].get_ptr(), it_beg, coord);
                         }
                         break;
