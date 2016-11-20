@@ -86,19 +86,19 @@ std::pair<int, int> Status::calc_coord(StrIterator it) const
     int col = 0;
 
     if (this->m_begins.empty()) {
-        SSS_POSTION_THROW(std::runtime_error, "empty Status::", __func__);
+        SSS_POSITION_THROW(std::runtime_error, "empty Status::", __func__);
     }
     if (std::distance(m_begins.front(), it) < 0 ||
         std::distance(it, m_ends.back()) < 0) {
-        SSS_POSTION_THROW(std::runtime_error, "it not in Status range");
+        SSS_POSITION_THROW(std::runtime_error, "it not in Status range");
     }
 
-    // lower_bound ºÍ upper_bound £¬·µ»ØµÄÊÇ²éÕÒÖµ v£¬ÔÚµÝÔöÇø¼ä[first,
-    // last)Ö®¼ä£¬
-    // µÚÒ»¸ö´óÓÚµÈÓÚ v ºÍ µÚÒ»¸ö´óÓÚ v µÄÖ¸Õë£»
+    // lower_bound å’Œ upper_bound ï¼Œè¿”å›žçš„æ˜¯æŸ¥æ‰¾å€¼ vï¼Œåœ¨é€’å¢žåŒºé—´[first,
+    // last)ä¹‹é—´ï¼Œ
+    // ç¬¬ä¸€ä¸ªå¤§äºŽç­‰äºŽ v å’Œ ç¬¬ä¸€ä¸ªå¤§äºŽ v çš„æŒ‡é’ˆï¼›
     //
-    // ¶øÎÒÐèÒªµÄÊÇ£¬µÚÒ»¸öÐ¡ÓÚµÈÓÚvµÄÖ¸Õë£¡£¨m_beginsÖÐ£©£¬»òÕß£º
-    // µÚÒ»¸ö´óÓÚµÈÓÚ v µÄÖ¸Õë£»£¨m_endsÖÐ£©£»
+    // è€Œæˆ‘éœ€è¦çš„æ˜¯ï¼Œç¬¬ä¸€ä¸ªå°äºŽç­‰äºŽvçš„æŒ‡é’ˆï¼ï¼ˆm_beginsä¸­ï¼‰ï¼Œæˆ–è€…ï¼š
+    // ç¬¬ä¸€ä¸ªå¤§äºŽç­‰äºŽ v çš„æŒ‡é’ˆï¼›ï¼ˆm_endsä¸­ï¼‰ï¼›
 
     auto it_row = std::lower_bound(m_ends.cbegin(), m_ends.cend(), it);
 
