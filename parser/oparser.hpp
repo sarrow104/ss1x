@@ -168,13 +168,13 @@ public:
 public:
     enum type_t {
         RULE_TYPE_NONE = 0,
-        RULE_TYPE_ANYCHAR,
-        RULE_TYPE_CHAR,
-        RULE_TYPE_RANGE,
-        RULE_TYPE_CHARSET,
+        RULE_TYPE_ANYCHAR,      // .
+        RULE_TYPE_CHAR,         // 'x'
+        RULE_TYPE_RANGE,        // 'z'-'z'
+        RULE_TYPE_CHARSET,      // "abcxyz"
 
-        RULE_TYPE_SEQUENCE,    // lit 序列
-        RULE_TYPE_DICTIONARY,  // 词典
+        RULE_TYPE_SEQUENCE,     // literal sequence; 序列
+        RULE_TYPE_DICTIONARY,   // 词典
 
         // 操作符重载
         RULE_OPERATOR_ASSERTNOT,   // !a; negtive predicate 否定预查
@@ -196,6 +196,7 @@ public:
         RULE_OPERATOR_SEP_SUGAR,    // a % b; equals to `a >> *(b >> a)`
         RULE_OPERATOR_PERMUTATION,  // a ^ b; Permutation.
         // Parse a or b or a followed by b or b followed by a.
+        // 好比set；并且分支可以组合；
 
         RULE_OPERATOR_REFER,  // 可以反复使用的，必须用REFER包裹一下；
                               // 这样；上层的可以保存其指针；
@@ -712,7 +713,7 @@ inline rule range(const rule& ref, int low, int high = -1)
     }
 
     if (high > 0 && high < low) {
-        SSS_POSTION_THROW(std::logic_error,
+        SSS_POSITION_THROW(std::logic_error,
                           "range high " , high , " less than low " , low);
     }
     rule ret(rule::RULE_OPERATOR_RANGETIMES);
