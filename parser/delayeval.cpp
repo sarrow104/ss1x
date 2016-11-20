@@ -21,9 +21,9 @@ delayeval::delayeval(const delayeval& rhs)
 {
 }
 
-// Ҫʹ���ƶ����캯���Ļ�������ͬʱ�ṩ�������캯��
+// 要使用移动构造函数的话，必须同时提供拷贝构造函数
 //
-// ������ֵ��� std::unique_ptr �Ŀ������죬�͸�ֵ����������delete״̬
+// 不过奇怪的是 std::unique_ptr 的拷贝构造，和赋值函数，都是delete状态
 //! /usr/include/c++/4.8/bits/unique_ptr.h|464
 delayeval::delayeval(delayeval&& rhs)
     : m_rul_ptr(rhs.m_rul_ptr),
@@ -51,7 +51,7 @@ delayeval& delayeval::operator=(delayeval&& rhs)
 void delayeval::eval() const
 {
     if (this->is_init()) {
-        SSS_POSTION_THROW(std::runtime_error,
+        SSS_POSITION_THROW(std::runtime_error,
                           "must eval at the root delayeval node");
     }
     for (SubsT::const_iterator it = this->m_subs.cbegin();
@@ -60,19 +60,19 @@ void delayeval::eval() const
     }
 }
 
-// FIXME �군��
-// ����Ӧ����������ȣ����ǹ�����ȣ�����ɶ��
+// FIXME 完蛋！
+// 到底应该是深度优先，还是广度优先，还是啥？
 //
-// Ӧ����ģ����ʽƥ�䣬�������Ⱥ�˳�򡭡�
-// ���ԣ���������ȡ���
+// 应该是模拟正式匹配，发生的先后顺序……
+// 所以，是深度优先……
 void delayeval::eval_inner() const
 {
     if (!this->is_init()) {
-        SSS_POSTION_THROW(std::runtime_error, "current sub node not init!");
+        SSS_POSITION_THROW(std::runtime_error, "current sub node not init!");
     }
 
     if (this->m_action == 0) {
-        SSS_POSTION_THROW(std::runtime_error,
+        SSS_POSITION_THROW(std::runtime_error,
                           "current sub delayeval has no action!");
     }
     for (SubsT::const_iterator it = this->m_subs.cbegin();
@@ -95,94 +95,94 @@ delayeval& delayeval::assign(const rule* p_rule, StrIterator it_beg,
     return *this;
 }
 
-// ����delayeval��ʹ�ó���
-// �û��ȶ�����һ��rule����������������û�а󶨶����ģ�
-// ������������ӹ����������а󶨸���action��
-// ���ţ��û�������һ��delayeval����
-// �û�ͨ����������match����(����������һ����װ����)��������ƥ��Ĺ��̣�
+// 考虑delayeval的使用场景
+// 用户先定义了一个rule——它本身往往是没有绑定动作的；
+// 组成这个对象的子规则，往往是有绑定各种action；
+// 接着，用户定义了一个delayeval对象；
+// 用户通过这个规则的match函数(或者其他的一个包装函数)，来启动匹配的过程；
 //
-// ���裬��һ�ν����do_match������Ϊ���㣻
-// �ö�����Ȼ�������κμ�¼��
-// ���ţ�����Ҫ����������������ӹ����ˣ�
-// �������Ƿ�֧�ʹ��ӣ� | �� >>����
-// �����Ƿ�֧������ÿ����֧���а��Լ��Ķ�����
+// 假设，第一次进入的do_match函数，为顶层；
+// 该顶层显然不用做任何记录；
+// 接着，就需要进入它下面包含的子规则了；
+// 常见的是分支和串接（ | 和 >>）；
+// 假设是分支，并且每个分支都有绑定自己的动作；
 //
-// ����1��
-//   ÿ��rule����ֻҪ�� delayeval �����룬������һ���Լ��ģ�Ȼ�󸽼������
-//   ����������棻
+// 策略1：
+//   每个rule对象，只要有 delayeval 对象传入，都创建一个自己的；然后附加在这个
+//   传入对象下面；
 //
-// ����2��
-//   ֻҪ�� delayeval �����룬ÿ����һ���ӹ��򣬱������
-//   rule::m_subs[i].do_match(...)�����ȴ���һ�� delayeval ����Ȼ�󽫸ö����
-//   ָ�룬��Ϊ�õ��õ� delayeval������
+// 策略2：
+//   只要有 delayeval 对象传入，每进入一次子规则，比如调用
+//   rule::m_subs[i].do_match(...)，就先创建一个 delayeval 对象，然后将该对象的
+//   指针，作为该调用的 delayeval参数。
 //
-//   �������ֵ�ǳɹ��ģ��ͽ������ʱ delayeval ���󣬲��뵽��ǰ��delayeval����
-//   ��
+//   如果返回值是成功的，就将这个临时 delayeval 对象，插入到当前的delayeval下面
+//   ；
 //
-// �ҵ�xml3����δ������أ�
+// 我的xml3是如何处理的呢？
 //
-// �ҵ�xml3 ʵ�������¹��ܣ�
+// 我的xml3 实现了如下功能：
 //
-// ���ö�������������Զ�����·�����䣬�����ظ�������
+// 利用对象构造和析构，自动处理路径记忆，避免重复搜索；
 //
-// �ؼ����� һ�� helper�� �� ���������Լ�Rewinder�ࣻ
+// 关键在于 一个 helper宏 和 包裹器，以及Rewinder类；
 // /home/sarrow/extra/sss/include/sss/xml3/xml_parser.cpp|111
 // /home/sarrow/extra/sss/include/sss/xml3/xml_parser.cpp|160
 //
-// ���а������Ĺ��캯������������Ƿ����·��(λ��+ƥ�亯��)���ã�������ԣ���
-// ֱ�Ӹ�����ǰ�Ľ���������½�һ��·����
-// �����������򿴵�ǰ·���Ƿ�ƥ��ɹ������ʧ�ܣ��򽫵�ǰ·�����롰��·�б�����
-// ͬʱ�����ڲ�����ƥ�����������Ѿ��ɹ��Ĳ��֣�����ɹ�·���б���
+// 其中包裹器的构造函数，用来检查是否可以路径(位置+匹配函数)复用？如果可以，则
+// 直接复用以前的结果；否则新建一个路径；
+// 析构函数，则看当前路径是否匹配成功？如果失败，则将当前路径插入“死路列表”；
+// 同时，将内部的子匹配结果，当做已经成功的部分，插入成功路径列表；
 //
-// �����û��� helper �꣬��ע���ǰ����û���дһ���������ص���䡪��ֻҪ����·��
-// ���Ѿ��߹�����ô��֮ǰ�Ľ���������ء��������ǳɹ�����ʧ�ܡ�
+// 至于用户的 helper 宏，则注意是帮助用户简写一个立即返回的语句——只要记忆路径
+// 中已经走过，那么把之前的结果立即返回——不管是成功还是失败。
 //
-// ��Rewinder�࣬��֤��ƥ����ָ���ߵ���ȷ��λ�á�������������¡�
+// 而Rewinder类，则保证了匹配流指针走到正确的位置——在上述情况下。
 //
-// ��Ҫע����ǣ�·�����ã�������÷�Χ���������������������ڽ�����״̬�Ļ���
-// ��ô����һ��·���Ļ������뱣���������״̬����������Ӧ�Ĵ�С�ȽϺ�����
+// 需要注意的是，路径复用，有其可用范围——如果解析结果，依赖于解释器状态的话，
+// 那么记忆一个路径的话，必须保存解析器的状态，并制作对应的大小比较函数。
 //
-// �����������������Ҫ���ѽϴ��ڴ�������Ļ�����ô������·�������㷨�������С�
+// 如果，解析器本身需要花费较大内存来保存的话，那么，上述路径记忆算法将不可行。
 //
-// Ҳ����˵����������Ҫʹ�ü򵥵�·�������㷨��Ҳ��Ҫ�ṩһ�����ز��У�
+// 也就是说，如果我真的要使用简单的路劲记忆算法，也需要提供一个开关才行；
 //
-// ��Ȼ������������������Ƕ��Դ���롪����Ҫ·�������ĵط�������Ҫʹ�øúꡭ��
+// 当然，我上述作法，必须嵌入源代码——需要路径处理的地方，都需要使用该宏……
 //
-// ��ô����ʱ�������Ӧ��ϵ�أ�
+// 那么处理时机，与对应关系呢？
 //
-// ����xml3��˵��segment-tree��ʵ����һ��ָ�����������
-// ָ��Ϊ�գ����ǿ�����
-// �ڵ��һ���Ļ����ʹ�����һ���ݹ��½�������ʹ���˰��������ɹ�ƥ�䣻
-// ��������ǵ�һ�ģ�Ҳ�ܱ�֤����������ȷ�ԣ�
-// Ȼ�󣬸����Ľṹ��ϵ�����������ö�����ȷ��·����һһ��Ӧ��
+// 对于xml3来说，segment-tree其实就是一个指针代表的树；
+// 指针为空，就是空树；
+// 节点仅一个的话，就代表仅一个递归下降函数，使用了包裹器并成功匹配；
+// 由于入口是单一的；也能保证单根树的正确性；
+// 然后，该树的结构关系，与解析最后敲定的正确的路径，一一对应；
 //
-// �����Ҳ���ֵ�����
+// 我最好也保持单根；
 //
-// ��������ʱ��������ָ�룬���Ƕ��󡪡����ص�ʱ��Ҳ�Ƕ���
+// 不过，此时，不再是指针，而是对象——返回的时候，也是对象；
 //
-// ��һ�����������Կ�����������
+// 第一个单根，可以看做是容器；
 //
-// �����������N���ӽڵ㡪�������Ǵ��ӹ�ϵ�������ǣ���������������ʲô��ϵ����
-// �����������������Ҫ��
+// 它下面可以有N个子节点——比如是串接关系，或者是；其他——至于是什么关系，对
+// 于这个解析树，还重要吗？
 //
-// ����Ҫ����Ҫ��ֻ�����߼��ϵġ���������ϵ������ĳ��������½磬�����ֵİ�����
-// ϵ��Ҳ�����߶�����
+// 不重要，重要的只是其逻辑上的“包含”关系——即某规则的上下界，所体现的包含关
+// 系，也就是线段树；
 //
-// ����ע�⣬����ɢ��֮�������򡪡���Ϊ��ȫ������ϵ����ʵ�������½���ȣ�����
-// ���߶Σ������޷������˭�����桢˭�����棻���Ծ��Բ��ܴ���֮��������
+// ——注意，不能散列之后，再排序——因为完全包含关系（其实就是上下界相等）的两
+// 个线段，可能无法分清楚谁在外面、谁在里面；所以绝对不能打乱之后再排序；
 //
-// ���뱣�ֽ�����ʱ��İ�����ϵ��
+// 必须保持解析的时候的包含关系！
 //
-// Ҳ����˵do_match�еõ���ָ�룬�൱�ڸ��ڵ�ָ�룻
-// Ȼ���ڲ������helper���ͻ����ʵ������������ָ���������ĸ������У�����һ��
-// �ڵ㡪���Ȳ����룬�ȴ�������helper���ڲ��ȴ���һ�� delayeval ����
+// 也就是说do_match中得到的指针，相当于父节点指针；
+// 然后内部的这个helper，就会根据实际情况，往这个指针所代表的父对象中，插入一个
+// 节点——先不插入，先创建——helper类内部先创建一个 delayeval 对象；
 //
-// Ȼ���ӹ���Ҫ�õ�delayeval����ָ��Ļ����͸�������������helper�л�ȡ��
+// 然后子规则，要用到delayeval对象指针的话，就根据情况，从这个helper中获取；
 //
-// ������������ʱ���پ����Ƿ���������Ĳ��붯����
+// 当析构函数的时候，再决定是否完成真正的插入动作；
 //
-// ���ڵݹ���õ��ص㣬���Ա�֤������©�Ӻ������ɵĶ��󣻡�����Ϊ�Ӻ������ȷ���
-// ��
+// 由于递归调用的特点，可以保证不会遗漏子函数生成的对象；——因为子函数，先返回
+// ；
 delayeval& delayeval::push_back(const rule* p_rule, StrIterator it_beg,
                                 StrIterator it_end, rule::ActionT action,
                                 rule::matched_value_t usr_data)
