@@ -1,14 +1,14 @@
 http://www.cppblog.com/qinqing1984/archive/2013/03/20/198644.html
 
-ÁíÍâ£¬²Î¿¼£º
+å¦å¤–ï¼Œå‚è€ƒï¼š
 
 http://blog.csdn.net/aalbertini/article/details/38300757
 
-ÎŞĞèÖ¤Êé£¬ÓĞÒ»¸öÎ´Íê³ÉµÄ´úÂë£º
+æ— éœ€è¯ä¹¦ï¼Œæœ‰ä¸€ä¸ªæœªå®Œæˆçš„ä»£ç ï¼š
 
 http://bbs.csdn.net/topics/390377646
 
-ÁíÍâÒ»¸öclientÀı×Ó£º
+å¦å¤–ä¸€ä¸ªclientä¾‹å­ï¼š
 
 http://stackoverflow.com/questions/22059026/connecting-to-an-https-server-with-boostasio
 
