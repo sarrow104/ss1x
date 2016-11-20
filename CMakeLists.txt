@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 2.8) 	# must surply this !
 add_definitions(-std=c++11)
+add_definitions(-fPIC)
 add_definitions(-W -fexceptions -Wunused-variable -Wfatal-errors)
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
