@@ -69,7 +69,8 @@ public:
     template <typename MutableBufferSequence>
     std::size_t read_some(const MutableBufferSequence& buffers)
     {
-        //与上面相同，但不带ec
+        ssl_socket_base_t* p = get_ssl_socket();
+        return p ? p->read_some(buffers) : get_socket()->read_some(buffers);
     }
     
     template <typename MutableBufferSequence, typename ReadHandler>
@@ -89,7 +90,8 @@ public:
     template <typename ConstBufferSequence>
     std::size_t write_some(const ConstBufferSequence& buffers)
     {
-        //与上面相同，但不带ec
+        ssl_socket_base_t* p = get_ssl_socket();
+        return p ? p->write_some(buffers,ec) : get_socket()->write_some(buffers);
     }
     
     template <typename MutableBufferSequence, typename ReadHandler>
