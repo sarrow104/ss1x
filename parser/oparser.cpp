@@ -311,7 +311,7 @@ bool rule::do_match(StrIterator& it_beg, StrIterator it_end, bool no_action,
             // LINE_END的话，这意味着，下一个，还未读取的是就是换行符，或者是流
             // 的结束——没有后续字节了；
             if (!p_st) {
-                SSS_POSTION_THROW(
+                SSS_POSITION_THROW(
                     std::runtime_error,
                     "To use RULE_ANCHOR_XXX, U must supply Stauts");
             }
@@ -324,7 +324,7 @@ bool rule::do_match(StrIterator& it_beg, StrIterator it_end, bool no_action,
 
         case RULE_ANCHOR_LINE_END:  // {{{1
             if (!p_st) {
-                SSS_POSTION_THROW(
+                SSS_POSITION_THROW(
                     std::runtime_error,
                     "To use RULE_ANCHOR_XXX, U must supply Stauts");
             }
@@ -337,7 +337,7 @@ bool rule::do_match(StrIterator& it_beg, StrIterator it_end, bool no_action,
 
         case RULE_ANCHOR_ROW_POS:
             if (!p_st) {
-                SSS_POSTION_THROW(
+                SSS_POSITION_THROW(
                     std::runtime_error,
                     "To use RULE_ANCHOR_XXX, U must supply Stauts");
             }
@@ -350,7 +350,7 @@ bool rule::do_match(StrIterator& it_beg, StrIterator it_end, bool no_action,
 
         case RULE_ANCHOR_COL_POS:
             if (!p_st) {
-                SSS_POSTION_THROW(
+                SSS_POSITION_THROW(
                     std::runtime_error,
                     "To use RULE_ANCHOR_XXX, U must supply Stauts");
             }
@@ -363,7 +363,7 @@ bool rule::do_match(StrIterator& it_beg, StrIterator it_end, bool no_action,
 
         case RULE_ANCHOR_COL_IF_TIMES:
             if (!p_st) {
-                SSS_POSTION_THROW(
+                SSS_POSITION_THROW(
                     std::runtime_error,
                     "To use RULE_ANCHOR_XXX, U must supply Stauts");
             }
