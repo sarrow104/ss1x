@@ -39,7 +39,7 @@ const ss1x::parser::rule& get_domain_p()
     static ss1x::parser::rule domain_p =
         (+(ss1x::parser::alnum_p | ss1x::parser::char_p('-')) %
          ss1x::parser::char_p('.')) >>
-        &(ss1x::parser::char_p('/') | ss1x::parser::char_p(':'));
+        &(ss1x::parser::char_p('/') | ss1x::parser::char_p(':') | ss1x::parser::eof_p);
     return domain_p;
 }
 
@@ -87,6 +87,16 @@ std::tuple<std::string, std::string, int, std::string> split(
             }
             std::get<2>(ret) = port;
         }
+        else {
+            // 2016-11-17 add default port number
+            // 或许，对于常见协议，还是默认0？
+            if (std::get<1>(ret)=="http") {
+                std::get<2>(ret) = 80;
+            }
+            else if (std::get<1>(ret)=="https") {
+                std::get<2>(ret) = 443;
+            }
+        }
         std::get<3>(ret).assign(it_beg, it_end);
     }
     else {
@@ -113,14 +123,16 @@ std::string join(const std::string& protocal, const std::string& domain,
     }
     oss << domain;
     if (port > 0) {
-        oss << ":" << port;
+        if ((protocal == "http" && port != 80) ||
+            (protocal == "https" && port != 443))
+        {
+            oss << ":" << port;
+        }
     }
-    if (command.empty()) {
+    if (command.empty() || command.front() != '/') {
         oss << "/";
     }
-    else {
-        oss << command;
-    }
+    oss << command;
     return oss.str();
 }
 
