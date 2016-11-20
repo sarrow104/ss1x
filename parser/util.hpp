@@ -92,7 +92,7 @@ namespace ss1x {
                 bool call(const rule * p_rule, StrIterator & it_beg, StrIterator it_end)
                 {
                     if (!p_rule) {
-                        SSS_POSTION_THROW(std::runtime_error,
+                        SSS_POSITION_THROW(std::runtime_error,
                                           "delayeval_helper::" , __func__ , " null rule * ptr!");
 
                     }
