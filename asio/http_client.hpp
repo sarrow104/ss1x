@@ -28,13 +28,10 @@ class http_client {
 public:
     http_client(boost::asio::io_service& io_service,
                 boost::asio::ssl::context* p_ctx = nullptr)
-        : m_resolver(io_service)
+        : m_resolver(io_service), m_socket(io_service), m_has_eof(false)
     {
         if (p_ctx) {
-            m_socket.init(io_service, *p_ctx);
-        }
-        else {
-            m_socket.init(io_service);
+            m_socket.upgrade_to_ssl(*p_ctx);
         }
     }
 
@@ -42,6 +39,7 @@ public:
     void setOnResponce(onResponce_t&& func) { m_onResponse = std::move(func); }
     void http_get(const std::string& server, int port, const std::string& path)
     {
+        COLOG_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
         std::ostream request_stream(&m_request);
         request_stream << "GET " << path << " HTTP/1.0\r\n";
         request_stream << "Host: " << server << "\r\n";
@@ -53,6 +51,8 @@ public:
         std::sprintf(port_buf, "%d", port <= 0 ? 80 : port);
 
         boost::asio::ip::tcp::resolver::query query(server, port_buf);
+        COLOG_DEBUG(SSS_VALUE_MSG(server));
+        COLOG_DEBUG(SSS_VALUE_MSG(port));
         m_resolver.async_resolve(
             query, boost::bind(&http_client::handle_resolve, this,
                                boost::asio::placeholders::error,
@@ -62,6 +62,7 @@ public:
     void http_post(const std::string& server, int port, const std::string& path,
                    const std::string& postParams)
     {
+        COLOG_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
         std::ostream request_stream(&m_request);
         // NOTE 可以从 m_headers 中，构造http-head。
         request_stream << "POST " << path << " HTTP/1.0\r\n";
@@ -87,6 +88,7 @@ public:
         const boost::system::error_code& e,
         boost::asio::ip::tcp::resolver::iterator endpoint_iterator)
     {
+        COLOG_DEBUG(e);
         if (!e) {
             if (m_socket.is_ssl()) {
                 m_socket.get_ssl_socket().set_verify_mode(
@@ -120,6 +122,7 @@ public:
     bool verify_certificate(bool preverified,
                             boost::asio::ssl::verify_context& ctx)
     {
+        COLOG_DEBUG(SSS_VALUE_MSG(preverified));
         // The verify callback can be used to check whether the certificate that
         // is
         // being presented is valid for the peer. For example, RFC 2818
@@ -132,7 +135,7 @@ public:
         // In this example we will simply print the certificate's subject name.
         char subject_name[256];
         X509* cert = X509_STORE_CTX_get_current_cert(ctx.native_handle());
-        X509_NAME_oneline(X509_get_subject_name(cert), subject_name, 256);
+        X509_NAME_oneline(X509_get_subject_name(cert), subject_name, sizeof(subject_name));
 
         COLOG_DEBUG("Verifying ", subject_name);
 
@@ -141,6 +144,7 @@ public:
 
     void handle_connect(const boost::system::error_code& e)
     {
+        COLOG_DEBUG(e);
         if (!e) {
             if (m_socket.is_ssl()) {
                 m_socket.get_ssl_socket().async_handshake(
@@ -162,6 +166,7 @@ public:
 
     void handle_handshake(const boost::system::error_code& e)
     {
+        COLOG_DEBUG(e);
         if (!e) {
             const char* header =
                 boost::asio::buffer_cast<const char*>(m_request.data());
@@ -180,6 +185,7 @@ public:
 
     void handle_write_request(const boost::system::error_code& err)
     {
+        COLOG_DEBUG(err);
         if (!err) {
             // Read the response status line. The m_response streambuf will
             // automatically grow to accommodate the entire line. The growth may
@@ -197,6 +203,7 @@ public:
 
     void handle_read_status_line(const boost::system::error_code& err)
     {
+        COLOG_DEBUG(err);
         if (!err) {
             // Check that response is OK.
             std::istream response_stream(&m_response);
@@ -237,6 +244,7 @@ public:
 
     void handle_read_headers(const boost::system::error_code& err)
     {
+        COLOG_DEBUG(err);
         if (!err) {
             // Process the response headers.
             std::istream response_stream(&m_response);
@@ -263,13 +271,14 @@ public:
             }
 
             // Write whatever content we already have to output.
-            if (m_response.size() > 0) {
+            if (m_response.size() > 0 && this->header().status_code == 200) {
                 COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
                 if (m_onResponse) {
                     m_onResponse(m_response);
                 }
             }
 
+            // NOTE 如果正文过短的话，可能到这里，已经读完socket缓存了。
             // Start reading remaining data until EOF.
             boost::asio::async_read(
                 m_socket, m_response, boost::asio::transfer_at_least(1),
@@ -283,11 +292,13 @@ public:
 
     void handle_read_content(const boost::system::error_code& err)
     {
+        // NOTE boost::asio::error::eof 打印输出 asio.misc:2
+        COLOG_DEBUG(err);
         if (!err) {
             // Write all of the data that has been read so far.
             COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
-            if (m_onResponse) {
+            if (m_onResponse && this->header().status_code == 200) {
                 m_onResponse(m_response);
             }
 
@@ -297,8 +308,9 @@ public:
                 boost::bind(&http_client::handle_read_content, this,
                             boost::asio::placeholders::error));
         }
-        else if (err != boost::asio::error::eof) {
+        else {
             set_error_code(err);
+            m_has_eof = (err == boost::asio::error::eof);
         }
     }
 
@@ -364,18 +376,21 @@ public:
     //     }
     // }
 
-    ss1x::http::Headers& header() { return m_headers; }
-    const boost::system::error_code& error_code() const { return m_ec; }
+    ss1x::http::Headers& header()                                            { return m_headers; }
+    const                boost::system::error_code& error_code() const       { return m_ec;      }
+    bool                 eof() const                                         { return m_has_eof; }
 protected:
-    void set_error_code(const boost::system::error_code& ec) { m_ec = ec; }
+    void                 set_error_code(const boost::system::error_code& ec) { m_ec = ec;        }
+
 private:
     boost::asio::ip::tcp::resolver m_resolver;
-    ss1x::detail::socket_t m_socket;
+    ss1x::detail::socket_t         m_socket;
+    bool                           m_has_eof;
 
-    boost::asio::streambuf m_request;
-    boost::asio::streambuf m_response;
+    boost::asio::streambuf         m_request;
+    boost::asio::streambuf         m_response;
 
-    ss1x::http::Headers m_headers;
-    boost::system::error_code m_ec;
-    onResponce_t m_onResponse;
+    ss1x::http::Headers            m_headers;
+    boost::system::error_code      m_ec;
+    onResponce_t                   m_onResponse;
 };
