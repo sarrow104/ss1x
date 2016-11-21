@@ -3,6 +3,12 @@
 
 #include <iosfwd>
 
+namespace boost {
+namespace system {
+class error_code;
+} // namespace system
+} // namespace boost
+
 namespace ss1x {
 namespace http {
 class Headers;
@@ -37,7 +43,7 @@ void proxyGetFile(std::ostream& outFile, ss1x::http::Headers& header,
                   const std::string& proxy_domain, int proxy_port,
                   const std::string& url);
 
-void redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
+boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
                      const std::string& url);
 
 // NOTE 关于通过本地http proxy，获取https资源
@@ -64,7 +70,7 @@ void redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
 // 5. Read further lines of response until you receive an empty line.
 // 6. Now, you are connected to the outside world through a proxy. Do any data
 //    exchange you want.
-// 这是院子 codeproject的那个页面的说法；相关代码是：
+// 这是源自 codeproject的那个页面的说法；相关代码是：
 //! /home/sarrow/project/proxy-downloader/HttpProxySocket.h:31
 // 	virtual void ConnectTo(LPCTSTR lpszHost , int nPort)
 // 	{
@@ -87,7 +93,6 @@ void redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
 // 		Line.Empty();
 // 		(*this)<<Line;
 // 
-// 
 // 		(*this)>>Line;
 // 
 // 		int i = Line.Find(' ');
@@ -101,15 +106,19 @@ void redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
 // 		}
 // 可见，就是用CONNECT与proxy进行简单的链接——获取一个200的正常编码之后，就把这个
 // 当做通道，完成后面的https交互流程——代理服务器，不会知道实际的交流内容。
-// 上例用的不是MFC代码，而是对winsocket2的保证。另外，重载了>>和<<操作符，以便同事完成读写操作。
+// 上例用的不是MFC代码，而是对winsocket2的保证。另外，重载了>>和<<操作符，以便同时完成读写操作。
+//
+// 没有理解错误的话，与proxy联系(CONNECT)动作的时候，用的是普通的socket；正常之后，
+// 用的是ssl的socket。也就是说，我需要一个"提升"的操作。在原有的socket基础智商，
+// 创建一个新的ssl-socket出来！upgrade_to_ssl()
 
 // 相关代码：
 
 //! http://boost.2283326.n4.nabble.com/boost-asio-SSL-connection-thru-proxy-server-td2586048.html
 //! https://github.com/Microsoft/cpprestsdk/blob/master/Release/src/http/client/http_client_asio.cpp
-void proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
-                          const std::string& proxy_domain, int proxy_port,
-                          const std::string& url);
+boost::system::error_code proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
+                                               const std::string& proxy_domain, int proxy_port,
+                                               const std::string& url);
 }  // namespace asio
 }  // namespace ss1x
 
