@@ -14,7 +14,7 @@ class Headers : public std::map<std::string, std::string> {
     typedef std::map<std::string, std::string> BaseT;
 
 public:
-    Headers() {}
+    Headers() : status_code(0) {}
     ~Headers() = default;
 
 public:
@@ -37,6 +37,11 @@ public:
         else {
             return "";
         }
+    }
+
+    bool has(const std::string& key) const
+    {
+        return this->BaseT::find(key) != this->BaseT::end();
     }
 
     std::string get(const std::string& key, const std::string& stem) const;
