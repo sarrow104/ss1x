@@ -1,12 +1,15 @@
 #pragma once
 
 #include <stdexcept>
+#include <memory>
 
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/bind.hpp>
 
 #include <sss/util/PostionThrow.hpp>
+#include <sss/colorlog.hpp>
+#include <sss/debug/value_msg.hpp>
 
 namespace ss1x {
 namespace detail {
@@ -18,87 +21,59 @@ constexpr T const& constexpr_max(T const& a, T const& b)
 
 struct socket_t {
 private:
-    typedef boost::asio::ip::tcp::socket basic_socket_t;
-    typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> ssl_socket_t;
-    char buf[detail::constexpr_max(sizeof(basic_socket_t),
-                                   sizeof(ssl_socket_t))];
     enum status_t { st_NONE, st_NORMAL, st_SSL };
+
     status_t m_status;
 
+    // typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> ssl_socket_t;
+    typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket_t;
+    typedef boost::asio::ip::tcp::socket basic_socket_t;
+    basic_socket_t m_socket;
+    std::unique_ptr<ssl_socket_t> m_ssl_stream;
+
 public:
-    socket_t() : m_status(st_NONE) {}
-    explicit socket_t(boost::asio::io_service& io_service) : m_status(st_NONE)
+    explicit socket_t(boost::asio::io_service& io_service): m_socket(io_service)
     {
-        this->init(io_service);
     }
     socket_t(boost::asio::io_service& io_service,
              boost::asio::ssl::context& ctx)
-        : m_status(st_NONE)
+        : m_socket(io_service), m_ssl_stream(new ssl_socket_t(m_socket, ctx))
     {
-        this->init(io_service, ctx);
+        // m_ssl_stream = utility::details::make_unique<boost::asio::ssl::stream<boost::asio::ip::tcp::socket &>>(m_socket, ssl_context);
     }
 
-    ~socket_t()
-    {
-        switch (m_status) {
-            case st_SSL:
-                reinterpret_cast<ssl_socket_t*>(buf)->~ssl_socket_t();
-                break;
+    ~socket_t() = default;
 
-            case st_NORMAL:
-                reinterpret_cast<basic_socket_t*>(buf)->~basic_socket_t();
-                break;
-
-            case st_NONE:
-                break;
-        }
-    }
-    void init(boost::asio::io_service& io_service)
+    void upgrade_to_ssl(boost::asio::ssl::context& ctx)
     {
-        if (m_status != st_NONE) {
-            SSS_POSITION_THROW(std::runtime_error, "not st_NONE");
-        }
-        m_status = st_NORMAL;
-        new (buf) basic_socket_t(io_service);
+        COLOG_DEBUG("from ", &ctx);
+        m_ssl_stream.reset(new ssl_socket_t(m_socket, ctx));
     }
-
-    void init(boost::asio::io_service& io_service,
-              boost::asio::ssl::context& ctx)
-    {
-        if (m_status != st_NONE) {
-            SSS_POSITION_THROW(std::runtime_error, "not st_NONE");
-        }
-        m_status = st_SSL;
-        new (buf) ssl_socket_t(io_service, ctx);
+    
+    bool is_ssl() const {
+        COLOG_DEBUG("is_ssl = ", bool(m_ssl_stream));
+        return bool(m_ssl_stream);
     }
-    bool is_ssl() const { return m_status == st_SSL; }
-    operator void*() const { return reinterpret_cast<void*>(m_status); }
+    operator const void*() const { return reinterpret_cast<const void*>(&m_socket); }
     basic_socket_t& get_socket()
     {
-        if (m_status != st_NORMAL) {
-            SSS_POSITION_THROW(std::runtime_error, "need normal socket here");
-        }
-        return *reinterpret_cast<basic_socket_t*>(buf);
+        return m_socket;
     }
     ssl_socket_t& get_ssl_socket()
     {
-        if (m_status != st_SSL) {
+        if (!m_ssl_stream) {
             SSS_POSITION_THROW(std::runtime_error, "need ssl socket here");
         }
-        return *reinterpret_cast<ssl_socket_t*>(buf);
+        return *m_ssl_stream;
     }
 
     boost::asio::ip::tcp::socket::lowest_layer_type& lowest_layer()
     {
-        switch (m_status) {
-            case st_NONE:
-                SSS_POSITION_THROW(std::runtime_error, "st_NONE");
-                break;
-            case st_NORMAL:
-                return get_socket().lowest_layer();
-
-            case st_SSL:
-                return get_ssl_socket().lowest_layer();
+        if (m_ssl_stream) {
+            return get_ssl_socket().lowest_layer();
+        }
+        else {
+            return get_socket().lowest_layer();
         }
     }
 
@@ -106,30 +81,22 @@ public:
     std::size_t read_some(const MutableBufferSequence& buffers,
                           boost::system::error_code& ec)
     {
-        switch (m_status) {
-            case st_NONE:
-                SSS_POSITION_THROW(std::runtime_error, "st_NONE");
-                break;
-            case st_NORMAL:
-                return get_socket().read_some(buffers, ec);
-
-            case st_SSL:
-                return get_ssl_socket().read_some(buffers);
+        if (m_ssl_stream) {
+            return get_ssl_socket().read_some(buffers);
+        }
+        else {
+            return get_socket().read_some(buffers, ec);
         }
     }
 
     template <typename MutableBufferSequence>
     std::size_t read_some(const MutableBufferSequence& buffers)
     {
-        switch (m_status) {
-            case st_NONE:
-                SSS_POSITION_THROW(std::runtime_error, "st_NONE");
-                break;
-            case st_NORMAL:
-                return get_socket().read_some(buffers);
-
-            case st_SSL:
-                return get_ssl_socket().read_some(buffers);
+        if (m_ssl_stream) {
+            return get_ssl_socket().read_some(buffers);
+        }
+        else {
+            return get_socket().read_some(buffers);
         }
     }
 
@@ -137,17 +104,11 @@ public:
     void async_read_some(const MutableBufferSequence& buffers,
                          ReadHandler&& handler)
     {
-        switch (m_status) {
-            case st_NONE:
-                SSS_POSITION_THROW(std::runtime_error, "st_NONE");
-                break;
-            case st_NORMAL:
-                get_socket().async_read_some(buffers, handler);
-                break;
-
-            case st_SSL:
-                get_ssl_socket().async_read_some(buffers, handler);
-                break;
+        if (m_ssl_stream) {
+            get_ssl_socket().async_read_some(buffers, handler);
+        }
+        else {
+            get_socket().async_read_some(buffers, handler);
         }
     }
 
@@ -156,17 +117,11 @@ public:
                           const std::string &delim,
                           ReadHandler&& handler)
     {
-        switch (m_status) {
-            case st_NONE:
-                SSS_POSITION_THROW(std::runtime_error, "st_NONE");
-                break;
-            case st_NORMAL:
-                boost::asio::async_read_until(get_socket(), buffers, delim, handler);
-                break;
-
-            case st_SSL:
-                boost::asio::async_read_until(get_ssl_socket(), buffers, delim, handler);
-                break;
+        if (m_ssl_stream) {
+            boost::asio::async_read_until(get_ssl_socket(), buffers, delim, handler);
+        }
+        else {
+            boost::asio::async_read_until(get_socket(), buffers, delim, handler);
         }
     }
 
@@ -174,30 +129,22 @@ public:
     std::size_t write_some(const ConstBufferSequence& buffers,
                            boost::system::error_code& ec)
     {
-        switch (m_status) {
-            case st_NONE:
-                SSS_POSITION_THROW(std::runtime_error, "st_NONE");
-                break;
-            case st_NORMAL:
-                return get_socket().write_some(buffers, ec);
-
-            case st_SSL:
-                return get_ssl_socket().write_some(buffers, ec);
+        if (m_ssl_stream) {
+            return get_ssl_socket().write_some(buffers, ec);
+        }
+        else {
+            return get_socket().write_some(buffers, ec);
         }
     }
 
     template <typename ConstBufferSequence>
     std::size_t write_some(const ConstBufferSequence& buffers)
     {
-        switch (m_status) {
-            case st_NONE:
-                SSS_POSITION_THROW(std::runtime_error, "st_NONE");
-                break;
-            case st_NORMAL:
-                return get_socket().write_some(buffers);
-
-            case st_SSL:
-                return get_ssl_socket().write_some(buffers);
+        if (m_ssl_stream) {
+            return get_ssl_socket().write_some(buffers);
+        }
+        else {
+            return get_socket().write_some(buffers);
         }
     }
 
@@ -205,17 +152,11 @@ public:
     void async_write_some(const MutableBufferSequence& buffers,
                           ReadHandler&& handler)
     {
-        switch (m_status) {
-            case st_NONE:
-                SSS_POSITION_THROW(std::runtime_error, "st_NONE");
-                break;
-            case st_NORMAL:
-                get_socket().async_write_some(buffers, handler);
-                break;
-
-            case st_SSL:
-                get_ssl_socket().async_write_some(buffers, handler);
-                break;
+        if (m_ssl_stream) {
+            get_ssl_socket().async_write_some(buffers, handler);
+        }
+        else {
+            get_socket().async_write_some(buffers, handler);
         }
     }
 };
