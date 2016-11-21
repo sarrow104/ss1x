@@ -1,6 +1,7 @@
 #include "GetFile.hpp"
 #include "headers.hpp"
 #include "http_client.hpp"
+#include "proxy_tunnel_client.hpp"
 #include "user_agent.hpp"
 
 #include <ss1x/asio/utility.hpp>
@@ -209,12 +210,9 @@ void getFileInner(std::ostream& outFile, ss1x::http::Headers* headers,
 
     // Try each endpoint until we successfully establish a connection.
     // tcp::socket socket(io_service);
-    ss1x::detail::socket_t socket;
+    ss1x::detail::socket_t socket(io_service);
     if (use_ssl) {
-        socket.init(io_service, *p_ctx);
-    }
-    else {
-        socket.init(io_service);
+        socket.upgrade_to_ssl(*p_ctx);
     }
 
     boost::system::error_code error = boost::asio::error::host_not_found;
@@ -408,17 +406,27 @@ void proxyGetFile(std::ostream& outFile, ss1x::http::Headers& header,
     ss1x::asio::getFile(outFile, header, proxy_domain, url, proxy_port);
 }
 
-void redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
-                     const std::string& url)
+boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
+                                          const std::string& url)
 {
     boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
     ctx.set_default_verify_paths();
+    ctx.set_options(boost::asio::ssl::context::default_workarounds);
+
+    auto url_info = ss1x::util::url::split_port_auto(url);
 
     int max_attempt = 5;
     bool is_ok = false;
     boost::asio::io_service io_service;
+    boost::system::error_code ec;
     do {
-        auto url_info = ss1x::util::url::split_port_auto(url);
+        // once returned from io_service.run(),run_once(),...,
+        // the io_service itself will be marked as stopped()
+        // and suquential recv(),send() actions will return immediately
+        COLOG_DEBUG(SSS_VALUE_MSG(io_service.stopped()));
+        if (io_service.stopped()) {
+            io_service.reset();
+        }
         COLOG_DEBUG(ss1x::util::url::join(url_info));
         http_client c(io_service, std::get<2>(url_info) == 443 ? &ctx : nullptr);
         c.setOnResponce([&](boost::asio::streambuf& response)->void { out << &response; });
@@ -473,12 +481,14 @@ void redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
         //　　如果网页自请求者上次请求后再也没有更改过，您应将服务器配置为返回此响应(称为
         //If-Modified-Since HTTP 标头)。服务器可以告诉 Googlebot
         //自从上次抓取后网页没有变更，进而节省带宽和开销。
+        ec = c.error_code();
 
+        COLOG_DEBUG(SSS_VALUE_MSG(c.eof()));
 
         switch (c.header().status_code) {
             case 200:
                 header = c.header();
-                is_ok = true;
+                is_ok = c.eof();
                 break;
             case 301: case 302:
                 if (!c.header()["Location"].empty()) {
@@ -493,23 +503,33 @@ void redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
                 break;
         }
     } while (!is_ok && max_attempt-- > 0);
+    return ec;
 }
 
-void proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
+boost::system::error_code proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
                           const std::string& proxy_domain, int proxy_port,
                           const std::string& url)
 {
+    // TODO 可以用跟踪法，看看avhttp，是如何使用proxy的。
     boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
     ctx.set_default_verify_paths();
+    auto url_info = ss1x::util::url::split_port_auto(url);
 
-    int max_attempt = 5;
+    int max_attempt = 1;
     bool is_ok = false;
     boost::asio::io_service io_service;
+    boost::system::error_code ec;
     do {
-        auto url_info = ss1x::util::url::split_port_auto(url);
-        http_client c(io_service, std::get<2>(url_info) == 443 ? &ctx : nullptr);
+        proxy_tunnel_client c(io_service, nullptr);
+        c.http_tunnel(proxy_domain, proxy_port);
+        io_service.run();
+        if (io_service.stopped()) {
+            io_service.reset();
+        }
+        c.upgrade_to_ssl(ctx);
+        COLOG_DEBUG(SSS_VALUE_MSG(c.header().status_code));
+        
         c.setOnResponce([&](boost::asio::streambuf& response)->void { out << &response; });
-        // std::get<1>(url_info), std::get<2>(url_info), std::get<3>(url_info)
         std::string proxy_command = std::get<0>(url_info) + "://" + std::get<1>(url_info);
         if (std::get<2>(url_info) != 443 && std::get<2>(url_info) != 80) {
             proxy_command += ':';
@@ -519,6 +539,7 @@ void proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
         COLOG_DEBUG(proxy_command);
         c.http_get(proxy_domain, proxy_port, proxy_command);
         io_service.run();
+        ec = c.error_code();
 
         switch (c.header().status_code) {
             case 200:
@@ -538,6 +559,7 @@ void proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
                 break;
         }
     } while (!is_ok && max_attempt-- > 0);
+    return ec;
 }
 
 //! http://boost.2283326.n4.nabble.com/boost-asio-SSL-connection-thru-proxy-server-td2586048.html
