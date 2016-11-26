@@ -873,14 +873,16 @@ private:
     void handle_read_content(int bytes_transferred, const boost::system::error_code& err)
     {
         COLOG_DEBUG(bytes_transferred, pretty_ec(err), m_response.size());
-        if (bytes_transferred <= 0) {
-            return;
-        }
-
         if (err) {
             // NOTE boost::asio::error::eof 打印输出 asio.misc:2
             m_has_eof = (err == boost::asio::error::eof);
             set_error_code(err);
+            return;
+        }
+
+        if (bytes_transferred <= 0) {
+            // NOTE hand-made eof mark
+            set_error_code(boost::asio::error::eof);
             return;
         }
 
