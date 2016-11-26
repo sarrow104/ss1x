@@ -227,7 +227,7 @@ public:
         m_socket.upgrade_to_ssl(ctx);
     }
 
-    void                    setOnContent(onResponce_t&& func) { m_onContent = std::move(func);        }
+    void                    setOnContent(onResponce_t&& func)  { m_onContent = std::move(func);        }
     void                    setOnEndCheck(onEndCheck_t&& func) { m_onEndCheck = std::move(func);       }
 
     ss1x::http::Headers&    header()                           { return m_headers;                     }
@@ -482,6 +482,7 @@ private:
         // Process the response headers from proxy server.
         std::istream response_stream(&m_response);
         std::string header;
+        m_headers.clear();
         while (std::getline(response_stream, header) && header != "\r") {
             size_t colon_pos = header.find(':');
             if (colon_pos == std::string::npos) {
@@ -666,6 +667,8 @@ private:
         std::istream response_stream(&m_response);
         std::string header;
         bool redirect = false;
+
+        this->m_headers.clear();
 
         // NOTE 在这里处理3xx(301,302)跳转！
         while (std::getline(response_stream, header) && header != "\r") {
@@ -894,6 +897,7 @@ private:
         COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
         if (is_end) {
+            set_error_code(boost::asio::error::eof);
             return;
         }
 
