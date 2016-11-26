@@ -35,6 +35,11 @@ public:
         }
     }
 
+    void upgrade_to_ssl(boost::asio::ssl::context& ctx)
+    {
+        m_socket.upgrade_to_ssl(ctx);
+    }
+
     typedef std::function<void(boost::asio::streambuf& response)> onResponce_t;
     void setOnResponce(onResponce_t&& func) { m_onResponse = std::move(func); }
     void http_get(const std::string& server, int port, const std::string& path)
