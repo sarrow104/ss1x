@@ -95,7 +95,7 @@ public:
     {
         COLOG_DEBUG(e);
         if (!e) {
-            if (m_socket.is_ssl()) {
+            if (m_socket.using_ssl()) {
                 m_socket.get_ssl_socket().set_verify_mode(
                     boost::asio::ssl::verify_peer);
 
@@ -151,7 +151,7 @@ public:
     {
         COLOG_DEBUG(e);
         if (!e) {
-            if (m_socket.is_ssl()) {
+            if (m_socket.using_ssl()) {
                 m_socket.get_ssl_socket().async_handshake(
                     boost::asio::ssl::stream_base::client,
                     boost::bind(&http_client::handle_handshake, this,
