@@ -54,7 +54,7 @@ inline std::ostream& operator << (std::ostream& o, const streambuf_t& b)
     return o;
 }
 
-streambuf_t streambuf_view(const boost::asio::streambuf& stream)
+inline streambuf_t streambuf_view(const boost::asio::streambuf& stream)
 {
     return streambuf_t{stream};
 }
@@ -78,7 +78,7 @@ inline std::ostream& operator << (std::ostream& o, const pretty_ec_t& pec)
     return o;
 }
 
-pretty_ec_t pretty_ec(const boost::system::error_code& ec)
+inline pretty_ec_t pretty_ec(const boost::system::error_code& ec)
 {
     return pretty_ec_t{ec};
 }
