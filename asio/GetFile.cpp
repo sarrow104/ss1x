@@ -411,99 +411,23 @@ boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers
 {
     boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
     ctx.set_default_verify_paths();
-    ctx.set_options(boost::asio::ssl::context::default_workarounds);
-
     auto url_info = ss1x::util::url::split_port_auto(url);
 
-    int max_attempt = 5;
-    bool is_ok = false;
     boost::asio::io_service io_service;
-    boost::system::error_code ec;
-    do {
-        // once returned from io_service.run(),run_once(),...,
-        // the io_service itself will be marked as stopped()
-        // and suquential recv(),send() actions will return immediately
-        COLOG_DEBUG(SSS_VALUE_MSG(io_service.stopped()));
-        if (io_service.stopped()) {
-            io_service.reset();
-        }
-        COLOG_DEBUG(ss1x::util::url::join(url_info));
-        http_client c(io_service, std::get<2>(url_info) == 443 ? &ctx : nullptr);
-        c.setOnResponce([&](boost::asio::streambuf& response)->void { out << &response; });
-        c.http_get(std::get<1>(url_info), std::get<2>(url_info), std::get<3>(url_info));
-        io_service.run();
 
-        // 301,302
-        //
-        // src/varlisp/builtin_http.cpp:71: ( http-get : http-status code: 302 )
-        // header : Connection: Close
-        // header : Content-Length: 215
-        // header : Content-Type: text/html
-        // header : Date: Sat, 19 Nov 2016 02:20:36 GMT
-        // header : Location: https://www.baidu.com/
-        //
-        // 10:21:14.596558552 src/varlisp/builtin_http.cpp:71: ( http-get : http-status code: 301 )
-        // header : Connection: close
-        // header : Content-Length: 178
-        // header : Content-Type: text/html
-        // header : Date: Sat, 19 Nov 2016 02:21:14 GMT
-        // header : Location: https://movie.douban.com/subject/3578925/
-        //
-        // 另外google，建议，不要连续使用5次3xx跳转。
-        //
-        //! http://blog.sina.com.cn/s/blog_687344480100kd53.html
-        // 3xx
-        //　　要完成请求，需要进一步操作。通常，这些状态码用来重定向。Google
-        //建议您在每次请求中使用重定向不要超过 5
-        //次。您可以使用网站管理员工具查看一下 Googlebot
-        //在抓取重定向网页时是否遇到问题。诊断下的网络抓取页列出了由于重定向错误导致
-        //Googlebot 无法抓取的网址。
-        //
-        //　　300(多种选择)针对请求，服务器可执行多种操作。服务器可根据请求者
-        //(user agent) 选择一项操作，或提供操作列表供请求者选择。
-        //
-        //　　301(永久移动)请求的网页已永久移动到新位置。服务器返回此响应(对 GET
-        //或 HEAD 请求的响应)时，会自动将请求者转到新位置。您应使用此代码告诉
-        //Googlebot 某个网页或网站已永久移动到新位置。
-        //
-        //　　302(临时移动)服务器目前从不同位置的网页响应请求，但请求者应继续使用原有位置来响应以后的请求。此代码与响应
-        //GET 和 HEAD 请求的 301
-        //代码类似，会自动将请求者转到不同的位置，但您不应使用此代码来告诉
-        //Googlebot 某个网页或网站已经移动，因为 Googlebot
-        //会继续抓取原有位置并编制索引。
-        //
-        //　　303(查看其他位置)请求者应当对不同的位置使用单独的 GET
-        //请求来检索响应时，服务器返回此代码。对于除 HEAD
-        //之外的所有请求，服务器会自动转到其他位置。
-        //
-        //　　304(未修改)自从上次请求后，请求的网页未修改过。服务器返回此响应时，不会返回网页内容。
-        //
-        //　　如果网页自请求者上次请求后再也没有更改过，您应将服务器配置为返回此响应(称为
-        //If-Modified-Since HTTP 标头)。服务器可以告诉 Googlebot
-        //自从上次抓取后网页没有变更，进而节省带宽和开销。
-        ec = c.error_code();
+    proxy_tunnel_client c(io_service, nullptr);
+    // c.max_redirect(0);
+    c.upgrade_to_ssl(ctx);
+    c.http_get(url);
+    c.setOnContent([&out](sss::string_view response) -> void { out << response; });
+    // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
+    // 于是，额外提供了一种检查机制，以便快速返回。
+    // c.setOnEndCheck([](sss::string_view sv)-> bool { return sv.find("</html>") != sss::string_view::npos; });
+    io_service.run();
+    COLOG_DEBUG(SSS_VALUE_MSG(c.header().status_code));
+    header = c.header();
 
-        COLOG_DEBUG(SSS_VALUE_MSG(c.eof()));
-
-        switch (c.header().status_code) {
-            case 200:
-                header = c.header();
-                is_ok = c.eof();
-                break;
-            case 301: case 302:
-                if (!c.header()["Location"].empty()) {
-                    url_info = ss1x::util::url::split_port_auto(c.header()["Location"]);
-                }
-                else {
-                    max_attempt = 0;
-                }
-                break;
-            default:
-                max_attempt = 0;
-                break;
-        }
-    } while (!is_ok && max_attempt-- > 0);
-    return ec;
+    return c.error_code();
 }
 
 boost::system::error_code proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
@@ -515,51 +439,24 @@ boost::system::error_code proxyRedirectHttpGet(std::ostream& out, ss1x::http::He
     ctx.set_default_verify_paths();
     auto url_info = ss1x::util::url::split_port_auto(url);
 
-    int max_attempt = 1;
-    bool is_ok = false;
     boost::asio::io_service io_service;
-    boost::system::error_code ec;
-    do {
-        proxy_tunnel_client c(io_service, nullptr);
-        c.http_tunnel(proxy_domain, proxy_port);
-        io_service.run();
-        if (io_service.stopped()) {
-            io_service.reset();
-        }
-        c.upgrade_to_ssl(ctx);
-        COLOG_DEBUG(SSS_VALUE_MSG(c.header().status_code));
-        
-        c.setOnResponce([&](boost::asio::streambuf& response)->void { out << &response; });
-        std::string proxy_command = std::get<0>(url_info) + "://" + std::get<1>(url_info);
-        if (std::get<2>(url_info) != 443 && std::get<2>(url_info) != 80) {
-            proxy_command += ':';
-            proxy_command.append(sss::cast_string(std::get<2>(url_info)));
-        }
-        proxy_command += std::get<3>(url_info);
-        COLOG_DEBUG(proxy_command);
-        c.http_get(proxy_domain, proxy_port, proxy_command);
-        io_service.run();
-        ec = c.error_code();
 
-        switch (c.header().status_code) {
-            case 200:
-                header = c.header();
-                is_ok = true;
-                break;
-            case 301: case 302:
-                if (!c.header()["Location"].empty()) {
-                    url_info = ss1x::util::url::split_port_auto(c.header()["Location"]);
-                }
-                else {
-                    max_attempt = 0;
-                }
-                break;
-            default:
-                max_attempt = 0;
-                break;
-        }
-    } while (!is_ok && max_attempt-- > 0);
-    return ec;
+    proxy_tunnel_client c(io_service, nullptr);
+    c.upgrade_to_ssl(ctx);
+    c.ssl_tunnel_get(proxy_domain, proxy_port, url);
+    c.setOnContent([&out](sss::string_view response) -> void {
+        out << response;
+    });
+    // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
+    // 于是，额外提供了一种检查机制，以便快速返回。
+    c.setOnEndCheck([](sss::string_view sv)-> bool {
+        return sv.find("</html>") != sss::string_view::npos;
+    });
+    io_service.run();
+    COLOG_DEBUG(SSS_VALUE_MSG(c.header().status_code));
+    header = c.header();
+
+    return c.error_code();
 }
 
 //! http://boost.2283326.n4.nabble.com/boost-asio-SSL-connection-thru-proxy-server-td2586048.html
