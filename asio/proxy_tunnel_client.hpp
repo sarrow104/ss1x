@@ -215,8 +215,8 @@ public:
           m_request(2048), m_response(2048)
     {
         
-        COLOG_ERROR(m_request.max_size());
-        COLOG_ERROR(m_response.max_size());
+        COLOG_DEBUG(m_request.max_size());
+        COLOG_DEBUG(m_response.max_size());
         if (p_ctx) {
             m_socket.upgrade_to_ssl(*p_ctx);
         }
