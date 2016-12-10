@@ -163,6 +163,9 @@ public:
     // utf8
     friend rule utf8_p(const char* utf8ch);
     friend rule utf8_set_p(const char* utf8ch);
+    // 关于中文
+    // 张勇范围：U+4E00..U+9FA5
+    //! http://blog.csdn.net/shuilan0066/article/details/7839189
     friend rule utf8_range_p(const char* utf8_low, const char* utf8_high);
 
 public:
@@ -667,6 +670,8 @@ extern const rule upper_p;
 extern const rule cidentifier_p;
 
 extern const rule double_p;
+
+extern const rule chinese_normal_p;
 
 // ----------------------------------------------------------------------
 

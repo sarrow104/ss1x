@@ -871,6 +871,8 @@ const rule double_p =
         .result(std::function<double(StrIterator, StrIterator)>(
             &util::slice2double));
 
+const rule chinese_normal_p = ss1x::parser::utf8_range_p("一", "龥");
+
 // 如何自动避开某些规则，skip动作？
 // 将避开的规则，当做参数，设置给某上层；
 //
