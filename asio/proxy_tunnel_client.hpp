@@ -926,6 +926,14 @@ private:
         //                 boost::asio::placeholders::error));
         //
         // Continue reading remaining data until EOF.
+        //
+        // NOTE
+        // 
+        // async_read(sock, buffer(size), handler)是读满size字节再调用handdler；
+        // asycn_read_some() 是读读一点就调用；
+        // 那么async_read + boost::asio::transfer_at_least(1) 呢？
+        //
+        // 当然，遇到错误(包括eof)，都会调用……
         boost::asio::async_read(
             m_socket, m_response, boost::asio::transfer_at_least(1),
             boost::bind(&proxy_tunnel_client::handle_read_content, this,
