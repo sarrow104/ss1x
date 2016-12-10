@@ -1,5 +1,7 @@
 #include "util.hpp"
 
+#include <limits>
+
 namespace ss1x {
 namespace parser {
 namespace util {
@@ -34,8 +36,42 @@ uint32_t parseUint32_t(ss1x::parser::StrIterator& it_beg,
 {
     uint32_t ret = 0;
     while (it_beg != it_end && std::isdigit(*it_beg)) {
+        int digit = *it_beg - '0';
+        uint32_t max_div_10 = std::numeric_limits<uint32_t>::max() / 10;
+        if ((ret > max_div_10) ||
+            (ret == max_div_10 &&
+            digit > int(std::numeric_limits<uint32_t>::max() % 10)))
+        {
+            SSS_POSITION_THROW(std::runtime_error,
+                               ret, max_div_10,
+                               digit, int(std::numeric_limits<uint32_t>::max() % 10));
+        }
         ret *= 10;
-        ret += (*it_beg - '0');
+        ret += digit;
+        ++it_beg;
+    }
+
+    return ret;
+}
+
+uint64_t parseUint64_t(ss1x::parser::StrIterator& it_beg,
+                       ss1x::parser::StrIterator it_end)
+{
+    uint64_t ret = 0;
+    while (it_beg != it_end && std::isdigit(*it_beg)) {
+        int digit = *it_beg - '0';
+        uint64_t max_div_10 = std::numeric_limits<uint64_t>::max() / 10;
+        uint64_t max = std::numeric_limits<uint64_t>::max();
+        if ((ret > max_div_10) ||
+            (ret == max_div_10 &&
+            digit > int(max % 10)))
+        {
+            SSS_POSITION_THROW(std::runtime_error,
+                               ret, max_div_10,
+                               digit, int(max % 10));
+        }
+        ret *= 10;
+        ret += digit;
         ++it_beg;
     }
 

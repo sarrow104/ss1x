@@ -200,6 +200,7 @@ namespace ss1x {
             
 
             uint32_t parseUint32_t(ss1x::parser::StrIterator& it_beg, ss1x::parser::StrIterator it_end);
+            uint64_t parseUint64_t(ss1x::parser::StrIterator& it_beg, ss1x::parser::StrIterator it_end);
 
             double slice2double(ss1x::parser::StrIterator it_beg, ss1x::parser::StrIterator it_end);
 
