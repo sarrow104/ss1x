@@ -29,14 +29,14 @@ const ss1x::parser::rule& get_protocal_p()
     static protocal_words dt;
 
     static ss1x::parser::rule protocal_p =
-        ss1x::parser::dict_p(dt) >> ss1x::parser::sequence("://");
+        ss1x::parser::dict_p(dt) > ss1x::parser::char_p(':') > &ss1x::parser::sequence("//");
 
     return protocal_p;
 }
 
 const ss1x::parser::rule& get_domain_p()
 {
-    static ss1x::parser::rule domain_p =
+    static ss1x::parser::rule domain_p = ss1x::parser::sequence("//") >>
         (+(ss1x::parser::alnum_p | ss1x::parser::char_p('-')) %
          ss1x::parser::char_p('.')) >>
         &(ss1x::parser::char_p('/') | ss1x::parser::char_p(':') | ss1x::parser::eof_p);
@@ -70,14 +70,15 @@ std::tuple<std::string, std::string, int, std::string> split(
     StrIterator it_beg = url.begin();
     StrIterator it_end = url.end();
 
-    // parse util ://, if had;
+    // parse util :, if had;
     if (protocal_p.match(it_beg, it_end)) {
         domain_beg = it_beg;
-        std::get<0>(ret).assign(url.cbegin(), domain_beg - 3);
+        std::get<0>(ret).assign(url.cbegin(), domain_beg - 1);
     }
     // parse domain-name
     if (domain_p.match(it_beg, it_end)) {
-        std::get<1>(ret).assign(domain_beg, it_beg);
+        // skip "//"
+        std::get<1>(ret).assign(domain_beg + 2, it_beg);
         StrIterator port_beg = it_beg;
         if (port_p.match(it_beg, it_end)) {
             int port = 0;
