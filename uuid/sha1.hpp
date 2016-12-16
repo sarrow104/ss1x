@@ -25,6 +25,9 @@ class sha1 : private boost::uuids::detail::sha1 {
 public:
     static std::string fromFile(const std::string& fname,
                                 size_t buffsize = 1024u * 128u);
+
+    static std::string fromBytes(const char * buf,
+                                 size_t buffsize);
 };
 }  // namespace uuid
 }  // namespace ss1x
