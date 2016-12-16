@@ -14,6 +14,12 @@ namespace url {
 std::tuple<std::string, std::string, int, std::string> split(
     const std::string& url);
 
+// NOTE 关于地址解析；
+// 除了正常的地址形式外(协议、域名、端口、请求路径，以及参数)，还有几种形式：
+//
+// 1. 省略协议 //domain.name/path?parameters 
+// 2. 省略域名 /path?parameters
+// 3. 相对路径 ../x.html img/hello.jpg
 inline auto split_port_auto(const std::string& url) -> decltype(ss1x::util::url::split(url))
 {
     auto url_info = ss1x::util::url::split(url);
@@ -24,11 +30,14 @@ inline auto split_port_auto(const std::string& url) -> decltype(ss1x::util::url:
         else if (std::get<0>(url_info) == "https"){
             std::get<2>(url_info) = 443;
         }
+        else {
+            std::get<2>(url_info) = 80;
+        }
     }
     if (std::get<3>(url_info).empty()) {
         std::get<3>(url_info) = "/";
     }
-    return std::move(url_info);
+    return url_info;
 }
 
 std::string join(
