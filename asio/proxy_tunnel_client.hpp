@@ -232,10 +232,13 @@ public:
     void                    setCookieFunc(CookieFunc_t&& func) {
         m_onRequestCookie = std::move(func);
     }
-    void                    setOnContent(onResponce_t&& func)  { m_onContent  = std::move(func);       }
-    void                    setOnEndCheck(onEndCheck_t&& func) { m_onEndCheck = std::move(func);       }
+    void                    setOnContent(const onResponce_t& func)  { m_onContent  = func;       }
+    void                    setOnEndCheck(const onEndCheck_t& func) { m_onEndCheck = func;       }
+    void                    setOnContent(onResponce_t&& func)  { m_onContent  = std::move(func); }
+    void                    setOnEndCheck(onEndCheck_t&& func) { m_onEndCheck = std::move(func); }
 
     ss1x::http::Headers&    header()                           { return m_headers;                     }
+    ss1x::http::Headers&    request_header()                   { return m_request_headers;             }
     bool                    eof() const                        { return m_has_eof;                     }
 
     const std::string       get_url() const                    { return m_redirect_urls.back();        }
@@ -253,6 +256,17 @@ public:
         http_get_impl();
     }
 
+    void ssl_tunnel_get(const std::string& proxy_domain, int proxy_port,
+                        const std::string& url)
+    {
+        m_redirect_urls.resize(0);
+        m_redirect_urls.push_back(url);
+        m_proxy_hostname = proxy_domain;
+        m_proxy_port = proxy_port;
+        ssl_tunnel_get_impl();
+    }
+
+private:
     bool is_need_ssl(const decltype(ss1x::util::url::split_port_auto("")) & url_info)
     {
         return std::get<2>(url_info) == 443;
@@ -274,14 +288,6 @@ public:
     {
         COLOG_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
 
-        std::ostream request_stream(&m_request);
-        request_stream << "GET " << path << " HTTP/1.0\r\n";
-        request_stream << "Host: " << server << "\r\n";
-        request_stream << "Accept: */*\r\n";
-        processRequestCookie(request_stream, server, path);
-        request_stream << "User-Agent: " << USER_AGENT_DEFAULT;
-        request_stream << "Connection: close\r\n\r\n";
-
         char port_buf[10];
         std::sprintf(port_buf, "%d", port <= 0 ? 80 : port);
 
@@ -294,17 +300,6 @@ public:
                                boost::asio::placeholders::iterator));
     }
 
-    void ssl_tunnel_get(const std::string& proxy_domain, int proxy_port,
-                        const std::string& url)
-    {
-        m_redirect_urls.resize(0);
-        m_redirect_urls.push_back(url);
-        m_proxy_hostname = proxy_domain;
-        m_proxy_port = proxy_port;
-        ssl_tunnel_get_impl();
-    }
-
-private:
     bool is_exceed_max_redirect() const
     {
         return m_redirect_urls.size() > m_max_redirect + 1;
@@ -312,13 +307,6 @@ private:
     void ssl_tunnel_get_impl()
     {
         COLOG_DEBUG(sss::raw_string(m_proxy_hostname), m_proxy_port);
-        auto url_info = ss1x::util::url::split_port_auto(get_url());
-        std::ostream request_stream(&m_request);
-        request_stream << "CONNECT " << std::get<1>(url_info) << ':'
-                       << std::get<2>(url_info) << " HTTP/1.1\r\n";
-        request_stream << "Host: " << m_proxy_hostname << ':' << m_proxy_port
-                       << "\r\n";
-        request_stream << "\r\n";  // empty line
 
         char port_buf[10];
         std::sprintf(port_buf, "%d", m_proxy_port <= 0 ? 80 : m_proxy_port);
@@ -402,7 +390,7 @@ private:
                        << std::get<2>(url_info) << " HTTP/1.1\r\n";
         request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
         request_stream << "Accept: text/html, application/xhtml+xml, */*\r\n";
-        request_stream << "User-Agent: " << USER_AGENT_DEFAULT;
+        request_stream << "User-Agent: " << USER_AGENT_DEFAULT << "\r\n";
 #if 1
         // NOTE 貌似 是否close，对于结果没啥影响
         request_stream << "Connection: close\r\n\r\n";
@@ -487,28 +475,7 @@ private:
         boost::system::error_code ec;
         // Process the response headers from proxy server.
         std::istream response_stream(&m_response);
-        std::string header;
-        m_headers.clear();
-        while (std::getline(response_stream, header) && header != "\r") {
-            size_t colon_pos = header.find(':');
-            if (colon_pos == std::string::npos) {
-                continue;
-            }
-            size_t value_beg =
-                header.find_first_not_of("\t ", colon_pos + 1);
-            if (value_beg == std::string::npos) {
-                value_beg = header.length();
-            }
-            // NOTE descard the last '\r'
-            size_t len = header.back() == '\r'
-                ? header.length() - value_beg - 1
-                : header.length() - value_beg;
-            m_headers[header.substr(0, colon_pos)] =
-                header.substr(value_beg, len);
-
-            // NOTE TODO 或许，应该用vector来保存header；
-            COLOG_DEBUG(sss::raw_string(header));
-        }
+        processHeader(m_headers, response_stream);
 
         // Write whatever content we already have to output.
         if (m_response.size() > 0 && this->header().status_code == 200) {
@@ -532,6 +499,38 @@ private:
             boost::asio::ssl::stream_base::client,
             boost::bind(&proxy_tunnel_client::handle_https_proxy_handshake, this,
                         boost::asio::placeholders::error));
+    }
+
+    void requestStreamHelper(std::set<std::string>& used_field,
+                             ss1x::http::Headers& request_header,
+                             std::ostream& request_stream,
+                             const std::string& field,
+                             const std::string& default_value = "")
+    {
+        if (used_field.find(field) != used_field.end()) {
+            return;
+        }
+        auto it = request_header.find(field);
+        if (it != request_header.end() && !it->second.empty())
+        {
+            request_stream << field << ": " << it->second << "\r\n";
+        }
+        else if (!default_value.empty()) {
+            request_stream << field << ": " << default_value << "\r\n";
+        }
+        used_field.insert(field);
+    }
+
+    void requestStreamDumpRest(std::set<std::string>& used_field,
+                               ss1x::http::Headers& request_header,
+                               std::ostream& request_stream)
+    {
+        for (const auto & kv : request_header) {
+            if (used_field.find(kv.first) != used_field.end()) {
+                continue;
+            }
+            request_stream << kv.first << ": " << kv.second << "\r\n";
+        }
     }
 
     void handle_https_proxy_handshake(const boost::system::error_code& err)
@@ -565,14 +564,43 @@ private:
         // Connection: close
 
         discard(m_response);
+        // NOTE 逻辑上，POST，GET，这两种方法，应该公用一个request-generator
         std::ostream request_stream(&m_request);
         auto url_info = ss1x::util::url::split_port_auto(get_url());
-        request_stream << "GET " << std::get<3>(url_info) << " HTTP/1.1\r\n";
+
+        request_stream << "GET " << std::get<3>(url_info) << " HTTP/";
+
+        if (!m_request_headers.http_version.empty()) {
+            int version_major = -1;
+            int version_minor = -1;
+            int offset = -1;
+            if (std::sscanf(m_request_headers.http_version.c_str(), "%d.%d%n",
+                            &version_major, &version_minor, &offset) != 2 ||
+                version_major <= 0 || version_minor < 0 ||
+                size_t(offset) != m_request_headers.http_version.length())
+            {
+                SSS_POSITION_THROW(
+                    std::runtime_error,
+                    "error parssing user supliment http-version with ",
+                    sss::raw_string(m_request_headers.http_version));
+            }
+            request_stream << m_request_headers.http_version;
+        }
+        else {
+            request_stream << "1.1";
+        }
+        request_stream << "\r\n";
+
+        std::set<std::string> used_field;
+
         request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
-        request_stream << "Accept: text/html, application/xhtml+xml, */*\r\n";
+        used_field.insert("Host");
+        requestStreamHelper(used_field, m_request_headers, request_stream, "Accept", "text/html, application/xhtml+xml, */*");
         processRequestCookie(request_stream, std::get<1>(url_info), std::get<3>(url_info));
-        request_stream << "User-Agent: " << USER_AGENT_DEFAULT;
-        request_stream << "Connection: " << "close" << "\r\n";
+        used_field.insert("Cookie");
+        requestStreamHelper(used_field, m_request_headers, request_stream, "User-Agent", USER_AGENT_DEFAULT);
+        requestStreamHelper(used_field, m_request_headers, request_stream, "Connection", "close");
+        requestStreamDumpRest(used_field, m_request_headers, request_stream);
         request_stream << "\r\n";
 
         COLOG_DEBUG(streambuf_view(m_request));
@@ -612,10 +640,12 @@ private:
             return;
         }
 
-        // 复制到新的streambuf中处理首行http状态, 如果不是http状态行, 那么将保持m_response中的内容,
-        // 这主要是为了兼容非标准http服务器直接向客户端发送文件的需要, 但是依然需要以malformed_status_line
-        // 通知用户, malformed_status_line并不意味着连接关闭, 关于m_response中的数据如何处理, 由用户自己
-        // 决定是否读取, 这时, 用户可以使用read_some/async_read_some来读取这个链接上的所有数据.
+        // 复制到新的streambuf中处理首行http状态, 如果不是http状态行, 那么将保
+        // 持m_response中的内容,这主要是为了兼容非标准http服务器直接向客户端发
+        // 送文件的需要, 但是依然需要以malformed_status_line通知用户,
+        // malformed_status_line并不意味着连接关闭, 关于m_response中的数据如何
+        // 处理, 由用户自己决定是否读取, 这时, 用户可以使用
+        // read_some/async_read_some来读取这个链接上的所有数据.
         boost::asio::streambuf tempbuf;
         // int response_size = m_response.size();
         boost::asio::buffer_copy(tempbuf.prepare(bytes_transferred), m_response.data());
@@ -650,6 +680,10 @@ private:
         //
         // TODO FIXME 唯一正确的处理办法，是状态机！
         // 这样，就不用保持数据，一直扩大缓存，也能处理各种 async_read_until 的结束条件
+        //
+        // 另外，大部分浏览器，处理header的时候，都是定义一个最大空间。比如2048；
+        // 这里的话，可以一个kv，限制最大长度是1024；然后可以有256个kv值对；
+        // 等等；
         boost::asio::async_read_until(
             m_socket, m_response, "\r\n\r\n",
             boost::bind(&proxy_tunnel_client::handle_read_header, this,
@@ -657,26 +691,11 @@ private:
                         boost::asio::placeholders::error));
     }
 
-    void handle_read_header(int bytes_transferred, const boost::system::error_code& err)
+    void processHeader(ss1x::http::Headers& headers, std::istream& response_stream)
     {
-        COLOG_DEBUG(bytes_transferred, pretty_ec(err));
-        COLOG_DEBUG(streambuf_view(m_response));
+        headers.clear();
 
-        if (err) {
-            set_error_code(err);
-            return;
-        }
-        // TODO FIXME
-        // 利用状态机，或者分行处理header；
-        // 假设header每个有效行，不会超过1024byte。
-        // 超过的，按错误处理。
-        // Process the response headers.
-        std::istream response_stream(&m_response);
         std::string header;
-        bool redirect = false;
-
-        this->m_headers.clear();
-
         // NOTE 在这里处理3xx(301,302)跳转！
         while (std::getline(response_stream, header) && header != "\r") {
             size_t colon_pos = header.find(':');
@@ -694,22 +713,51 @@ private:
                 : header.length() - value_beg;
             std::string key = header.substr(0, colon_pos);
             std::string value = header.substr(value_beg, len);
-            switch (this->header().status_code) {
-                case 301:
-                case 302:
-                    if (key == "Location" && !value.empty() && value != this->get_url()) {
-                        redirect = true;
-                        this->m_redirect_urls.push_back(value);
-                    }
-                    break;
-
-                default:
-                    break;
-            }
-            m_headers[key] = value;
+            headers[key] = value;
 
             // NOTE TODO 或许，应该用vector来保存header；
             COLOG_DEBUG(sss::raw_string(header));
+        }
+    }
+
+    void handle_read_header(int bytes_transferred, const boost::system::error_code& err)
+    {
+        COLOG_DEBUG(bytes_transferred, pretty_ec(err));
+        COLOG_DEBUG(streambuf_view(m_response));
+
+        if (err) {
+            set_error_code(err);
+            return;
+        }
+        // TODO FIXME
+        // 利用状态机，或者分行处理header；
+        // 假设header每个有效行，不会超过1024byte。
+        // 超过的，按错误处理。
+        // Process the response headers.
+        std::istream response_stream(&m_response);
+
+        processHeader(m_headers, response_stream);
+
+        bool redirect = false;
+
+        switch (this->header().status_code) {
+            // NOTE FIXME 301,302这里有种情况没有考虑到——就是明明是跳转，
+            // 但是没有提供Location(或者因为种种原因，未获取到该值)
+            case 301:
+            case 302:
+                {
+                    const auto it = m_headers.find("Location");
+                    if (it != m_headers.end()) {
+                        if (!it->second.empty() && it->second != this->get_url()) {
+                            redirect = true;
+                            this->m_redirect_urls.push_back(it->second);
+                        }
+                    }
+                }
+                break;
+
+            default:
+                break;
         }
 
         // Write whatever content we already have to output.
@@ -834,12 +882,7 @@ private:
                             boost::asio::placeholders::error));
         }
         else {
-            // TODO
-            // 讲request的生成，延迟到这里进行！
-            boost::asio::async_write(
-                m_socket, m_request,
-                boost::bind(&proxy_tunnel_client::handle_write_request,
-                            this, boost::asio::placeholders::error));
+            async_request();
         }
     }
 
@@ -850,33 +893,11 @@ private:
             set_error_code(err);
             return;
         }
-        const char* header =
-            boost::asio::buffer_cast<const char*>(m_request.data());
-        COLOG_DEBUG(SSS_VALUE_MSG(header));
+        // const char* header =
+        //     boost::asio::buffer_cast<const char*>(m_request.data());
+        // COLOG_DEBUG(SSS_VALUE_MSG(header));
 
-        // The handshake was successful. Send the request.
-        boost::asio::async_write(
-            m_socket, m_request,
-            boost::bind(&proxy_tunnel_client::handle_write_request, this,
-                        boost::asio::placeholders::error));
-    }
-
-    void handle_write_request(const boost::system::error_code& err)
-    {
-        COLOG_DEBUG(pretty_ec(err));
-        if (err) {
-            set_error_code(err);
-            return;
-        }
-        // Read the response status line. The m_response streambuf will
-        // automatically grow to accommodate the entire line. The growth
-        // may be limited by passing a maximum size to the streambuf
-        // constructor.
-        boost::asio::async_read_until(
-            m_socket, m_response, "\r\n",
-            boost::bind(&proxy_tunnel_client::handle_read_status, this,
-                        boost::asio::placeholders::bytes_transferred,
-                        boost::asio::placeholders::error));
+        async_request();
     }
 
     void handle_read_content(int bytes_transferred, const boost::system::error_code& err)
@@ -996,11 +1017,10 @@ private:
 protected:
     void processRequestCookie(std::ostream& request_stream, const std::string& server, const std::string& path)
     {
-        COLOG_INFO(server, path, bool(m_onRequestCookie));
         if (m_onRequestCookie) {
             std::string cookie = m_onRequestCookie(server, path);
-            COLOG_INFO(cookie);
             if (!cookie.empty()) {
+                COLOG_INFO(server, path, cookie);
                 request_stream << "Cookie: " << cookie << "\r\n";
             }
         }
@@ -1064,6 +1084,7 @@ private:
     // TODO 也许，应该将header分开,request,responce
     // 不过，对于header()函数来说，用户一般只关心responce的header。
     ss1x::http::Headers            m_headers;
+    ss1x::http::Headers            m_request_headers;
     boost::system::error_code      m_ec;
     // std::string                    m_request_cookie;
     std::string                    m_proxy_hostname;
