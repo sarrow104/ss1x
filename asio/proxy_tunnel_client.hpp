@@ -206,6 +206,8 @@ class proxy_tunnel_client {
 public:
     typedef std::function<void(sss::string_view responce)> onResponce_t;
     typedef std::function<bool(sss::string_view mark)> onEndCheck_t;
+    typedef std::function<std::string(const std::string& domain, const std::string& path)>
+             CookieFunc_t;
 
 public:
     proxy_tunnel_client(boost::asio::io_service& io_service,
@@ -227,7 +229,10 @@ public:
         m_socket.upgrade_to_ssl(ctx);
     }
 
-    void                    setOnContent(onResponce_t&& func)  { m_onContent = std::move(func);        }
+    void                    setCookieFunc(CookieFunc_t&& func) {
+        m_onRequestCookie = std::move(func);
+    }
+    void                    setOnContent(onResponce_t&& func)  { m_onContent  = std::move(func);       }
     void                    setOnEndCheck(onEndCheck_t&& func) { m_onEndCheck = std::move(func);       }
 
     ss1x::http::Headers&    header()                           { return m_headers;                     }
@@ -273,6 +278,7 @@ public:
         request_stream << "GET " << path << " HTTP/1.0\r\n";
         request_stream << "Host: " << server << "\r\n";
         request_stream << "Accept: */*\r\n";
+        processRequestCookie(request_stream, server, path);
         request_stream << "User-Agent: " << USER_AGENT_DEFAULT;
         request_stream << "Connection: close\r\n\r\n";
 
@@ -564,6 +570,7 @@ private:
         request_stream << "GET " << std::get<3>(url_info) << " HTTP/1.1\r\n";
         request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
         request_stream << "Accept: text/html, application/xhtml+xml, */*\r\n";
+        processRequestCookie(request_stream, std::get<1>(url_info), std::get<3>(url_info));
         request_stream << "User-Agent: " << USER_AGENT_DEFAULT;
         request_stream << "Connection: " << "close" << "\r\n";
         request_stream << "\r\n";
@@ -827,6 +834,8 @@ private:
                             boost::asio::placeholders::error));
         }
         else {
+            // TODO
+            // 讲request的生成，延迟到这里进行！
             boost::asio::async_write(
                 m_socket, m_request,
                 boost::bind(&proxy_tunnel_client::handle_write_request,
@@ -985,6 +994,18 @@ private:
     // }
 
 protected:
+    void processRequestCookie(std::ostream& request_stream, const std::string& server, const std::string& path)
+    {
+        COLOG_INFO(server, path, bool(m_onRequestCookie));
+        if (m_onRequestCookie) {
+            std::string cookie = m_onRequestCookie(server, path);
+            COLOG_INFO(cookie);
+            if (!cookie.empty()) {
+                request_stream << "Cookie: " << cookie << "\r\n";
+            }
+        }
+    }
+
     void set_error_code(const boost::system::error_code& ec) { m_ec = ec; }
     void discard(boost::asio::streambuf& responce, int bytes_transferred = 0)
     {
@@ -1044,9 +1065,11 @@ private:
     // 不过，对于header()函数来说，用户一般只关心responce的header。
     ss1x::http::Headers            m_headers;
     boost::system::error_code      m_ec;
+    // std::string                    m_request_cookie;
     std::string                    m_proxy_hostname;
     int                            m_proxy_port;
     std::vector<std::string>       m_redirect_urls;
     onResponce_t                   m_onContent;
     onEndCheck_t                   m_onEndCheck;
+    CookieFunc_t                   m_onRequestCookie;
 };
