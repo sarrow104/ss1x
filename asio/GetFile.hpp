@@ -2,6 +2,7 @@
 #define __GETFILE_HPP_1456798559__
 
 #include <iosfwd>
+#include <functional>
 
 namespace boost {
 namespace system {
@@ -42,6 +43,12 @@ void proxyGetFile(std::ostream& outFile, ss1x::http::Headers& header,
 void proxyGetFile(std::ostream& outFile, ss1x::http::Headers& header,
                   const std::string& proxy_domain, int proxy_port,
                   const std::string& url);
+
+typedef std::function<std::string(const std::string& domain, const std::string& path)>
+     CookieFunc_t;
+
+boost::system::error_code redirectHttpGetCookie(std::ostream& out, ss1x::http::Headers& header,
+                     const std::string& url, CookieFunc_t&&);
 
 boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
                      const std::string& url);
@@ -116,6 +123,10 @@ boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers
 
 //! http://boost.2283326.n4.nabble.com/boost-asio-SSL-connection-thru-proxy-server-td2586048.html
 //! https://github.com/Microsoft/cpprestsdk/blob/master/Release/src/http/client/http_client_asio.cpp
+boost::system::error_code proxyRedirectHttpGetCookie(std::ostream& out, ss1x::http::Headers& header,
+                                               const std::string& proxy_domain, int proxy_port,
+                                               const std::string& url, CookieFunc_t&&);
+
 boost::system::error_code proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
                                                const std::string& proxy_domain, int proxy_port,
                                                const std::string& url);
