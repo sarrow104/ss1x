@@ -8,17 +8,17 @@
 
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
-#include <memory>
 
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
 
 #include <sss/Terminal.hpp>
-#include <sss/util/PostionThrow.hpp>
 #include <sss/debug/value_msg.hpp>
+#include <sss/util/PostionThrow.hpp>
 #include <sss/utlstring.hpp>
 
 namespace ss1x {
@@ -186,10 +186,12 @@ void getFileInner(std::ostream& outFile, ss1x::http::Headers* headers,
         sprintf(service_port, "%d", port);
     }
 
-    std::unique_ptr<boost::asio::ssl::context> p_ctx;;
+    std::unique_ptr<boost::asio::ssl::context> p_ctx;
+    ;
     bool use_ssl = (port == 443);
     if (use_ssl) {
-        p_ctx.reset(new boost::asio::ssl::context(boost::asio::ssl::context::sslv23));
+        p_ctx.reset(
+            new boost::asio::ssl::context(boost::asio::ssl::context::sslv23));
         p_ctx->set_default_verify_paths();
     }
 
@@ -312,7 +314,6 @@ void getFileInner(std::ostream& outFile, ss1x::http::Headers* headers,
 }
 }  // detail namespace
 
-
 void getFile(std::ostream& outFile, const std::string& serverName,
              const std::string& getCommand, int port)
 {
@@ -406,8 +407,18 @@ void proxyGetFile(std::ostream& outFile, ss1x::http::Headers& header,
     ss1x::asio::getFile(outFile, header, proxy_domain, url, proxy_port);
 }
 
-boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
+boost::system::error_code redirectHttpGet(std::ostream& out,
+                                          ss1x::http::Headers& header,
                                           const std::string& url)
+{
+    CookieFunc_t cookieFun;
+    return redirectHttpGetCookie(out, header, url, std::move(cookieFun));
+}
+
+boost::system::error_code redirectHttpGetCookie(std::ostream& out,
+                                                ss1x::http::Headers& header,
+                                                const std::string& url,
+                                                CookieFunc_t&& cookieFun)
 {
     boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
     ctx.set_default_verify_paths();
@@ -418,11 +429,14 @@ boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers
     proxy_tunnel_client c(io_service, nullptr);
     // c.max_redirect(0);
     c.upgrade_to_ssl(ctx);
+    c.setOnContent(
+        [&out](sss::string_view response) -> void { out << response; });
+    c.setCookieFunc(std::move(cookieFun));
     c.http_get(url);
-    c.setOnContent([&out](sss::string_view response) -> void { out << response; });
     // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
     // 于是，额外提供了一种检查机制，以便快速返回。
-    // c.setOnEndCheck([](sss::string_view sv)-> bool { return sv.find("</html>") != sss::string_view::npos; });
+    // c.setOnEndCheck([](sss::string_view sv)-> bool { return
+    // sv.find("</html>") != sss::string_view::npos; });
     io_service.run();
     COLOG_DEBUG(SSS_VALUE_MSG(c.header().status_code));
     header = c.header();
@@ -430,9 +444,21 @@ boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers
     return c.error_code();
 }
 
-boost::system::error_code proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
-                          const std::string& proxy_domain, int proxy_port,
-                          const std::string& url)
+boost::system::error_code proxyRedirectHttpGet(std::ostream& out,
+                                               ss1x::http::Headers& header,
+                                               const std::string& proxy_domain,
+                                               int proxy_port,
+                                               const std::string& url)
+{
+    CookieFunc_t cookieFun;
+    return proxyRedirectHttpGetCookie(out, header, proxy_domain, proxy_port,
+                                      url, std::move(cookieFun));
+}
+
+boost::system::error_code proxyRedirectHttpGetCookie(
+    std::ostream& out, ss1x::http::Headers& header,
+    const std::string& proxy_domain, int proxy_port, const std::string& url,
+    CookieFunc_t&& cookieFun)
 {
     // TODO 可以用跟踪法，看看avhttp，是如何使用proxy的。
     boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
@@ -443,15 +469,15 @@ boost::system::error_code proxyRedirectHttpGet(std::ostream& out, ss1x::http::He
 
     proxy_tunnel_client c(io_service, nullptr);
     c.upgrade_to_ssl(ctx);
-    c.ssl_tunnel_get(proxy_domain, proxy_port, url);
-    c.setOnContent([&out](sss::string_view response) -> void {
-        out << response;
-    });
+    c.setOnContent(
+        [&out](sss::string_view response) -> void { out << response; });
+    c.setCookieFunc(std::move(cookieFun));
     // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
     // 于是，额外提供了一种检查机制，以便快速返回。
-    c.setOnEndCheck([](sss::string_view sv)-> bool {
+    c.setOnEndCheck([](sss::string_view sv) -> bool {
         return sv.find("</html>") != sss::string_view::npos;
     });
+    c.ssl_tunnel_get(proxy_domain, proxy_port, url);
     io_service.run();
     COLOG_DEBUG(SSS_VALUE_MSG(c.header().status_code));
     header = c.header();
