@@ -4,6 +4,8 @@
 #include <iosfwd>
 #include <functional>
 
+#include "headers.hpp"
+
 namespace boost {
 namespace system {
 class error_code;
@@ -11,9 +13,7 @@ class error_code;
 } // namespace boost
 
 namespace ss1x {
-namespace http {
-class Headers;
-}  // namespace http
+
 namespace asio {
 
 void getFile(std::ostream& outFile, const std::string& serverName,
@@ -47,11 +47,13 @@ void proxyGetFile(std::ostream& outFile, ss1x::http::Headers& header,
 typedef std::function<std::string(const std::string& domain, const std::string& path)>
      CookieFunc_t;
 
-boost::system::error_code redirectHttpGetCookie(std::ostream& out, ss1x::http::Headers& header,
-                     const std::string& url, CookieFunc_t&&);
+boost::system::error_code redirectHttpGetCookie(
+    std::ostream& out, ss1x::http::Headers& header, const std::string& url,
+    CookieFunc_t&&, const ss1x::http::Headers& request_header = {});
 
-boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
-                     const std::string& url);
+boost::system::error_code redirectHttpGet(
+    std::ostream& out, ss1x::http::Headers& header, const std::string& url,
+    const ss1x::http::Headers& request_header = {});
 
 // NOTE 关于通过本地http proxy，获取https资源
 // 关键词：https asio Tunneling proxy connect
@@ -123,13 +125,15 @@ boost::system::error_code redirectHttpGet(std::ostream& out, ss1x::http::Headers
 
 //! http://boost.2283326.n4.nabble.com/boost-asio-SSL-connection-thru-proxy-server-td2586048.html
 //! https://github.com/Microsoft/cpprestsdk/blob/master/Release/src/http/client/http_client_asio.cpp
-boost::system::error_code proxyRedirectHttpGetCookie(std::ostream& out, ss1x::http::Headers& header,
-                                               const std::string& proxy_domain, int proxy_port,
-                                               const std::string& url, CookieFunc_t&&);
+boost::system::error_code proxyRedirectHttpGetCookie(
+    std::ostream& out, ss1x::http::Headers& header,
+    const std::string& proxy_domain, int proxy_port, const std::string& url,
+    CookieFunc_t&&, const ss1x::http::Headers& request_header = {});
 
-boost::system::error_code proxyRedirectHttpGet(std::ostream& out, ss1x::http::Headers& header,
-                                               const std::string& proxy_domain, int proxy_port,
-                                               const std::string& url);
+boost::system::error_code proxyRedirectHttpGet(
+    std::ostream& out, ss1x::http::Headers& header,
+    const std::string& proxy_domain, int proxy_port, const std::string& url,
+    const ss1x::http::Headers& request_header = {});
 }  // namespace asio
 }  // namespace ss1x
 
