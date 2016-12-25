@@ -15,6 +15,7 @@ class Headers : public std::map<std::string, std::string> {
 
 public:
     Headers() : status_code(0) {}
+    Headers(std::initializer_list<BaseT::value_type> il) : BaseT(il), status_code(0) {}
     ~Headers() = default;
 
 public:
