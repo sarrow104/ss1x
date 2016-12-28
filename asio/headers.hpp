@@ -45,6 +45,13 @@ public:
         return this->BaseT::find(key) != this->BaseT::end();
     }
 
+    bool has_kv(const std::string& key, const std::string& value) const
+    {
+        auto it = this->BaseT::find(key);
+        
+        return it != this->BaseT::end() && it->second == value;
+    }
+
     std::string get(const std::string& key, const std::string& stem) const;
 
     unsigned int status_code;
