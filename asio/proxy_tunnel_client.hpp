@@ -24,6 +24,7 @@
 #include <sss/debug/value_msg.hpp>
 #include <sss/util/PostionThrow.hpp>
 #include <sss/string_view.hpp>
+#include <sss/utlstring.hpp>
 
 #include <ss1x/asio/headers.hpp>
 #include <ss1x/asio/error_codec.hpp>
@@ -212,9 +213,14 @@ public:
 public:
     proxy_tunnel_client(boost::asio::io_service& io_service,
                         boost::asio::ssl::context* p_ctx = nullptr)
-        : m_resolver(io_service), m_socket(io_service), m_has_eof(false),
+        : m_resolver(io_service),
+          m_socket(io_service),
+          m_has_eof(false),
+          m_chunked_transfer(false),
+          m_chunk_size(0),
           m_max_redirect(5),
-          m_request(2048), m_response(2048)
+          m_request(2048),
+          m_response(2048)
     {
         
         COLOG_DEBUG(m_request.max_size());
@@ -564,6 +570,7 @@ private:
         // Connection: close
 
         discard(m_response);
+        discard(m_request);
         // NOTE 逻辑上，POST，GET，这两种方法，应该公用一个request-generator
         std::ostream request_stream(&m_request);
         auto url_info = ss1x::util::url::split_port_auto(get_url());
@@ -584,10 +591,19 @@ private:
                     "error parssing user supliment http-version with ",
                     sss::raw_string(m_request_headers.http_version));
             }
+            COLOG_DEBUG("http_version", m_request_headers.http_version);
             request_stream << m_request_headers.http_version;
         }
         else {
-            request_stream << "1.1";
+            // NOTE HTTP/1.1 可能需要支持
+            // Transfer-Encoding "chunked"
+            // 特性，这需要特殊处理！先读取16进制的长度数字，然后读取该长度的数据。
+            // 不过，如果中间发生了截断，怎么办？即，被m_responce本身的buffer阶段了……
+            // 还有，如果chunk数，太大了怎么办？另外，读取chunk数，本身的时候，
+            // 被截断了，怎么办？
+            // 只能是状态机了！
+            COLOG_DEBUG("http_version", "1.0");
+            request_stream << "1.0";
         }
         request_stream << "\r\n";
 
@@ -699,6 +715,9 @@ private:
         // NOTE 在这里处理3xx(301,302)跳转！
         while (std::getline(response_stream, header) && header != "\r") {
             size_t colon_pos = header.find(':');
+            if (header.back() == '\r') {
+                header.pop_back();
+            }
             if (colon_pos == std::string::npos) {
                 continue;
             }
@@ -708,9 +727,7 @@ private:
                 value_beg = header.length();
             }
             // NOTE descard the last '\r'
-            size_t len = header.back() == '\r'
-                ? header.length() - value_beg - 1
-                : header.length() - value_beg;
+            size_t len = header.length() - value_beg;
             std::string key = header.substr(0, colon_pos);
             std::string value = header.substr(value_beg, len);
             headers[key] = value;
@@ -738,6 +755,13 @@ private:
 
         processHeader(m_headers, response_stream);
 
+        COLOG_DEBUG(m_headers);
+
+        if (m_headers.has_kv("Transfer-Encoding", "chunked")) {
+            this->m_chunked_transfer = true;
+            COLOG_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
+        }
+
         bool redirect = false;
 
         switch (this->header().status_code) {
@@ -760,15 +784,6 @@ private:
                 break;
         }
 
-        // Write whatever content we already have to output.
-        if (m_response.size() > 0 && this->header().status_code == 200) {
-            COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
-            consume_content(m_response);
-        }
-        else {
-            discard(m_response);
-        }
-
         if (redirect) {
             if (is_exceed_max_redirect()) {
                 set_error_code(ss1x::errc::exceed_max_redirect);
@@ -783,10 +798,89 @@ private:
             }
         }
 
-        // NOTE 如果正文过短的话，可能到这里，已经读完socket缓存了。
-        // Start reading remaining data until EOF.
+        if (m_chunked_transfer) {
+            boost::asio::async_read_until(
+                m_socket, m_response, "\r\n",
+                boost::bind(&proxy_tunnel_client::handle_read_chunk_head, this,
+                            boost::asio::placeholders::bytes_transferred,
+                            boost::asio::placeholders::error));
+        }
+        else {
+            // Write whatever content we already have to output.
+            if (m_response.size() > 0 && this->header().status_code == 200) {
+                COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
+                consume_content(m_response);
+            }
+            else {
+                discard(m_response);
+            }
+            // NOTE 如果正文过短的话，可能到这里，已经读完socket缓存了。
+            // Start reading remaining data until EOF.
+            boost::asio::async_read(
+                m_socket, m_response, boost::asio::transfer_at_least(1),
+                boost::bind(&proxy_tunnel_client::handle_read_content, this,
+                            boost::asio::placeholders::bytes_transferred,
+                            boost::asio::placeholders::error));
+        }
+    }
+
+    void handle_read_chunk_head(int bytes_transferred, const boost::system::error_code& err)
+    {
+        COLOG_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
+        if (bytes_transferred <= 0) {
+            // NOTE hand-made eof mark
+            set_error_code(boost::asio::error::eof);
+            return;
+        }
+
+        int chunk_size = -1;
+        boost::asio::streambuf::const_buffers_type::const_iterator begin(
+            m_response.data().begin());
+        const char* ptr = boost::asio::buffer_cast<const char*>(*begin);
+        sss::string_view sv(ptr, bytes_transferred);
+        int offset = -1;
+        int ec = std::sscanf(ptr, "%x%n", &chunk_size, &offset);
+        if (ec != 1) {
+            SSS_POSITION_THROW(std::runtime_error,
+                               "parse x-digit-number error: ",
+                               sss::raw_string(sv));
+        }
+        // NOTE 标准允许chunk_size的16进制字符后面，跟若干padding用的空格字符！
+        bool is_all_space =
+            sss::is_all(ptr + offset, ptr + bytes_transferred - 2,
+                        [](char ch) -> bool { return ch == ' '; });
+        if (!is_all_space) {
+            SSS_POSITION_THROW(std::runtime_error,
+                               "unexpect none-blankspace trailing byte: ",
+                               sss::raw_string(sss::string_view(
+                                   ptr + offset,
+                                   bytes_transferred - 2 - offset)));
+        }
+
+        bool is_end_with_crlf = sv.is_end_with("\r\n");
+        if (!is_end_with_crlf) {
+            SSS_POSITION_THROW(std::runtime_error,
+                               "unexpect none-crlf trailing bytes: ",
+                               sss::raw_string(sv));
+        }
+
+        m_chunk_size = chunk_size + 2;
+        COLOG_DEBUG(SSS_VALUE_MSG(chunk_size), " <- ", sss::raw_string(sv));
+        discard(m_response, bytes_transferred);
+        if (!chunk_size) {
+            COLOG_DEBUG(SSS_VALUE_MSG(chunk_size));
+            return;
+        }
+
+        if (err) {
+            // NOTE boost::asio::error::eof 打印输出 asio.misc:2
+            m_has_eof = (err == boost::asio::error::eof);
+            set_error_code(err);
+            return;
+        }
+
         boost::asio::async_read(
-            m_socket, m_response, boost::asio::transfer_at_least(1),
+            m_socket, m_response, boost::asio::transfer_exactly(m_chunk_size),
             boost::bind(&proxy_tunnel_client::handle_read_content, this,
                         boost::asio::placeholders::bytes_transferred,
                         boost::asio::placeholders::error));
@@ -902,14 +996,7 @@ private:
 
     void handle_read_content(int bytes_transferred, const boost::system::error_code& err)
     {
-        COLOG_DEBUG(bytes_transferred, pretty_ec(err), m_response.size());
-        if (err) {
-            // NOTE boost::asio::error::eof 打印输出 asio.misc:2
-            m_has_eof = (err == boost::asio::error::eof);
-            set_error_code(err);
-            return;
-        }
-
+        COLOG_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
         if (bytes_transferred <= 0) {
             // NOTE hand-made eof mark
             set_error_code(boost::asio::error::eof);
@@ -931,6 +1018,24 @@ private:
         if (is_end) {
             set_error_code(boost::asio::error::eof);
             return;
+        }
+
+        if (err) {
+            // NOTE boost::asio::error::eof 打印输出 asio.misc:2
+            m_has_eof = (err == boost::asio::error::eof);
+            set_error_code(err);
+            if (!m_chunk_size) {
+                return;
+            }
+            if (m_has_eof && m_chunk_size) {
+                if (m_onContent && this->header().status_code == 200) {
+                    consume_content(m_response, m_chunk_size);
+                }
+                else {
+                    discard(m_response);
+                }
+                // m_response.commit(m_chunk_size + 5);
+            }
         }
 
         // NOTE
@@ -964,11 +1069,29 @@ private:
         // 那么async_read + boost::asio::transfer_at_least(1) 呢？
         //
         // 当然，遇到错误(包括eof)，都会调用……
-        boost::asio::async_read(
-            m_socket, m_response, boost::asio::transfer_at_least(1),
-            boost::bind(&proxy_tunnel_client::handle_read_content, this,
-                        boost::asio::placeholders::bytes_transferred,
-                        boost::asio::placeholders::error));
+        if (m_chunked_transfer) {
+            if (m_chunk_size) {
+                boost::asio::async_read(
+                    m_socket, m_response, boost::asio::transfer_exactly(m_chunk_size),
+                    boost::bind(&proxy_tunnel_client::handle_read_content, this,
+                                boost::asio::placeholders::bytes_transferred,
+                                boost::asio::placeholders::error));
+            }
+            else {
+                boost::asio::async_read_until(
+                    m_socket, m_response, "\r\n",
+                    boost::bind(&proxy_tunnel_client::handle_read_chunk_head, this,
+                                boost::asio::placeholders::bytes_transferred,
+                                boost::asio::placeholders::error));
+            }
+        }
+        else {
+            boost::asio::async_read(
+                m_socket, m_response, boost::asio::transfer_at_least(1),
+                boost::bind(&proxy_tunnel_client::handle_read_content, this,
+                            boost::asio::placeholders::bytes_transferred,
+                            boost::asio::placeholders::error));
+        }
     }
 
     // void async_connect(const std::string& address, const std::string& port)
@@ -1038,7 +1161,11 @@ protected:
     }
     void consume_content(boost::asio::streambuf& responce, int bytes_transferred = 0)
     {
-        COLOG_DEBUG(SSS_VALUE_MSG(responce.size()), SSS_VALUE_MSG(bytes_transferred));
+        // NOTE m_chunk_size 包括了结尾的"\r\n"!
+        // 如果 bytes_transferred 正好等于 m_chunk_size，说明，这次刚好读到chunk结束
+        // 如果小于m_chunk_size，则都说明，还有数据。
+        // 并且，最后两个字节，需要忽略！
+        COLOG_DEBUG(bytes_transferred, "out of", responce.size());
         if (m_onContent) {
             std::size_t size = responce.size();
             if (bytes_transferred > 0 && size > std::size_t(bytes_transferred)) {
@@ -1048,6 +1175,51 @@ protected:
                 responce.data().begin());
             const char* ptr = boost::asio::buffer_cast<const char*>(*begin);
             sss::string_view sv(ptr, size);
+            if (m_chunked_transfer) {
+                switch (m_chunk_size - bytes_transferred) {
+                    case 0:
+                        {
+                            int trail_len = std::min(2, bytes_transferred);
+                            sss::string_view trail(
+                                sss::string_view("\r\n").substr(2 - trail_len));
+                            if (!sv.is_end_with(trail)) {
+                                SSS_POSITION_THROW(std::runtime_error,
+                                                   "chunked data not end with ",
+                                                   sss::raw_string(trail), ", but ",
+                                                   sss::raw_string(sv));
+                            }
+                            sv.remove_suffix(trail_len);
+                            m_chunk_size = 0;
+                        }
+                        break;
+
+                    case 1:
+                        {
+                            int trail_len = std::min(1, bytes_transferred);
+                            sss::string_view trail(
+                                sss::string_view("\r\n").substr(2 - trail_len));
+                            if (!sv.is_end_with(trail)) {
+                                SSS_POSITION_THROW(std::runtime_error,
+                                                   "chunked data not end with ",
+                                                   sss::raw_string(trail), ", but ",
+                                                   sss::raw_string(sv));
+                            }
+                            sv.remove_suffix(trail_len);
+                            m_chunk_size = 1;
+                        }
+                        break;
+
+                    default:
+                        if (bytes_transferred > m_chunk_size) {
+                            SSS_POSITION_THROW(
+                                std::runtime_error,
+                                size_t(bytes_transferred), ">", m_chunk_size);
+                        }
+                        // bytes_transferred <= m_chunk_size - 2
+                        m_chunk_size -= bytes_transferred;
+                        COLOG_DEBUG("left ", m_chunk_size);
+                }
+            }
             m_onContent(sv);
             responce.consume(size);
         }
@@ -1073,6 +1245,10 @@ private:
     boost::asio::ip::tcp::resolver m_resolver;
     ss1x::detail::socket_t         m_socket;
     bool                           m_has_eof;
+    //! https://en.wikipedia.org/wiki/Chunked_transfer_encoding
+    //! http://blog.csdn.net/whatday/article/details/7571451
+    bool                           m_chunked_transfer;
+    int32_t                        m_chunk_size;
     // 最大跳转次数
     // 0 表示，不允许跳转；
     // 1 表示可以跳转一次；以此类推
@@ -1086,7 +1262,6 @@ private:
     ss1x::http::Headers            m_headers;
     ss1x::http::Headers            m_request_headers;
     boost::system::error_code      m_ec;
-    // std::string                    m_request_cookie;
     std::string                    m_proxy_hostname;
     int                            m_proxy_port;
     std::vector<std::string>       m_redirect_urls;
