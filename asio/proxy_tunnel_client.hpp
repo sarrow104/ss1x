@@ -1004,8 +1004,6 @@ private:
         }
 
         // Write all of the data that has been read so far.
-        COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
-
         bool is_end = this->is_end_chunk(m_response);
         if (m_onContent && this->header().status_code == 200) {
             consume_content(m_response, bytes_transferred);
