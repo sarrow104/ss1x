@@ -25,6 +25,7 @@
 #include <sss/util/PostionThrow.hpp>
 #include <sss/string_view.hpp>
 #include <sss/utlstring.hpp>
+#include <sss/hex_print.hpp>
 
 #include <ss1x/asio/headers.hpp>
 #include <ss1x/asio/error_codec.hpp>
@@ -306,12 +307,19 @@ private:
                                boost::asio::placeholders::iterator));
     }
 
-    bool is_exceed_max_redirect() const
+    bool had_exceed_max_redirect() const
     {
         return m_redirect_urls.size() > m_max_redirect + 1;
     }
     void ssl_tunnel_get_impl()
     {
+        auto url_info = ss1x::util::url::split_port_auto(get_url());
+        if (is_need_ssl(url_info)) {
+            m_socket.upgrade_to_ssl();
+        }
+        else {
+            m_socket.disable_ssl();
+        }
         COLOG_DEBUG(sss::raw_string(m_proxy_hostname), m_proxy_port);
 
         char port_buf[10];
@@ -392,24 +400,33 @@ private:
         discard(m_response);
         std::ostream request_stream(&m_request);
         auto url_info = ss1x::util::url::split_port_auto(get_url());
-        request_stream << "CONNECT " << std::get<1>(url_info) << ":"
-                       << std::get<2>(url_info) << " HTTP/1.1\r\n";
-        request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
-        request_stream << "Accept: text/html, application/xhtml+xml, */*\r\n";
-        request_stream << "User-Agent: " << USER_AGENT_DEFAULT << "\r\n";
+        if (std::get<0>(url_info) == "https") {
+            request_stream << "CONNECT " << std::get<1>(url_info);
+            if (std::get<2>(url_info) != 80) {
+                request_stream << ":" << std::get<2>(url_info);
+            }
+            request_stream << " HTTP/1.1\r\n";
+            request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
+            request_stream << "Accept: text/html, application/xhtml+xml, */*\r\n";
+            request_stream << "User-Agent: " << USER_AGENT_DEFAULT << "\r\n";
 #if 1
-        // NOTE 貌似 是否close，对于结果没啥影响
-        request_stream << "Connection: close\r\n\r\n";
+            // NOTE 貌似 是否close，对于结果没啥影响
+            request_stream << "Connection: close\r\n\r\n";
 #endif
-        request_stream << "\r\n";
+            request_stream << "\r\n";
 
-        COLOG_DEBUG(streambuf_view(m_request));
+            COLOG_DEBUG(streambuf_view(m_request));
 
-        boost::asio::async_write(
-            sock, m_request, boost::asio::transfer_exactly(m_request.size()),
-            boost::bind(
-                &proxy_tunnel_client::handle_https_proxy_request<Stream>, this,
-                boost::ref(sock), boost::asio::placeholders::error));
+            boost::asio::async_write(
+                sock, m_request, boost::asio::transfer_exactly(m_request.size()),
+                boost::bind(
+                    &proxy_tunnel_client::handle_https_proxy_request<Stream>, this,
+                    boost::ref(sock), boost::asio::placeholders::error));
+        }
+        else {
+            async_request();
+            return;
+        }
     }
 
     template<typename Stream>
@@ -575,7 +592,12 @@ private:
         std::ostream request_stream(&m_request);
         auto url_info = ss1x::util::url::split_port_auto(get_url());
 
-        request_stream << "GET " << std::get<3>(url_info) << " HTTP/";
+        if (m_proxy_hostname.empty()) {
+            request_stream << "GET " << std::get<3>(url_info) << " HTTP/";
+        }
+        else {
+            request_stream << "GET " << this->get_url() << " HTTP/";
+        }
 
         if (!m_request_headers.http_version.empty()) {
             int version_major = -1;
@@ -609,7 +631,12 @@ private:
 
         std::set<std::string> used_field;
 
-        request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
+        if (m_proxy_hostname.empty()) {
+            request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
+        }
+        else {
+            request_stream << "Host: " << m_proxy_hostname << "\r\n";
+        }
         used_field.insert("Host");
         requestStreamHelper(used_field, m_request_headers, request_stream, "Accept", "text/html, application/xhtml+xml, */*");
         processRequestCookie(request_stream, std::get<1>(url_info), std::get<3>(url_info));
@@ -757,11 +784,6 @@ private:
 
         COLOG_DEBUG(m_headers);
 
-        if (m_headers.has_kv("Transfer-Encoding", "chunked")) {
-            this->m_chunked_transfer = true;
-            COLOG_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
-        }
-
         bool redirect = false;
 
         switch (this->header().status_code) {
@@ -774,9 +796,28 @@ private:
                     if (it != m_headers.end()) {
                         if (!it->second.empty() && it->second != this->get_url()) {
                             redirect = true;
-                            this->m_redirect_urls.push_back(it->second);
+                            auto newLocation = ss1x::util::url::full_of_copy(it->second, this->get_url());
+                            COLOG_INFO(SSS_VALUE_MSG(newLocation));
+                            this->m_redirect_urls.push_back(newLocation);
+                        }
+                        else {
+                            COLOG_ERROR(it->second, " invalid");
+                            set_error_code(ss1x::errc::invalid_redirect);
+                            return;
                         }
                     }
+                    else {
+                        COLOG_ERROR("con not found Location");
+                        set_error_code(ss1x::errc::redirect_not_found);
+                        return;
+                    }
+                }
+                break;
+
+            case 200:
+                if (m_headers.has_kv("Transfer-Encoding", "chunked")) { // 将chunked处理，移动到跳转的后面
+                    this->m_chunked_transfer = true;
+                    COLOG_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
                 }
                 break;
 
@@ -785,7 +826,7 @@ private:
         }
 
         if (redirect) {
-            if (is_exceed_max_redirect()) {
+            if (had_exceed_max_redirect()) {
                 set_error_code(ss1x::errc::exceed_max_redirect);
                 return;
             }
@@ -869,6 +910,7 @@ private:
         discard(m_response, bytes_transferred);
         if (!chunk_size) {
             COLOG_DEBUG(SSS_VALUE_MSG(chunk_size));
+            set_error_code(boost::asio::error::eof);
             return;
         }
 
@@ -1004,7 +1046,7 @@ private:
         }
 
         // Write all of the data that has been read so far.
-        bool is_end = this->is_end_chunk(m_response);
+        bool is_end = (!m_chunked_transfer && this->is_end_chunk(m_response)) || (m_chunked_transfer && !m_chunk_size);
         if (m_onContent && this->header().status_code == 200) {
             consume_content(m_response, bytes_transferred);
         }
@@ -1014,6 +1056,7 @@ private:
         COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
         if (is_end) {
+            COLOG_ERROR("is_end_chunk");
             set_error_code(boost::asio::error::eof);
             return;
         }
