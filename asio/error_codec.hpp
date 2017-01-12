@@ -70,6 +70,8 @@ enum errc_t
 
     exceed_max_redirect = 13,
 
+    redirect_not_found = 14,
+
 	// Server-generated status codes.
 
 	/// The server-generated status code "100 Continue".
@@ -274,6 +276,8 @@ class error_category_impl
 			return "Invalid redirect address";
         case errc::exceed_max_redirect:
             return "Exceed max redirect";
+        case errc::redirect_not_found:
+            return "Redirect not found";
 		case errc::continue_request:
 			return "Continue";
 		case errc::switching_protocols:
