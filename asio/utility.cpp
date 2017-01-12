@@ -1,6 +1,6 @@
-#include <gumbo_query/Document.h>
-#include <gumbo_query/Node.h>
-#include <gumbo_query/Selection.h>
+#include <gq/Document.h>
+#include <gq/Node.h>
+#include <gq/Selection.h>
 
 #include <ss1x/parser/dictionary.hpp>
 #include <ss1x/parser/oparser.hpp>
