@@ -966,6 +966,7 @@ private:
             m_socket.get_ssl_socket().set_verify_mode(
                 boost::asio::ssl::verify_peer);
 
+#if USE_509
             m_socket.get_ssl_socket().set_verify_callback(boost::bind(
                     &proxy_tunnel_client::verify_certificate, this, _1, _2));
             // TODO
@@ -975,6 +976,22 @@ private:
             // else {
             //     m_ssl_stream->set_verify_mode(boost::asio::ssl::context::verify_none);
             // }
+#else
+            boost::system::error_code ec;
+            std::string host = std::get<1>(ss1x::util::url::split_port_auto(get_url()));
+
+            // http://stackoverflow.com/questions/35387482/security-consequences-due-to-setting-set-verify-modeboostasiosslverify-n
+            m_socket.get_ssl_socket().set_verify_mode(boost::asio::ssl::verify_none);
+			m_socket.get_ssl_socket().set_verify_callback(
+				boost::asio::ssl::rfc2818_verification(host), ec);
+
+			if (ec)
+			{
+                COLOG_ERROR("Set verify callback \'" , host, "\', error message \'" , ec.message() , "\'");
+				return;
+			}
+#endif
+
         }
         boost::asio::async_connect(
             m_socket.lowest_layer(), endpoint_iterator,
