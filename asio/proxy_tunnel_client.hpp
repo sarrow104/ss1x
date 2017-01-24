@@ -2,6 +2,7 @@
 
 #include "socket_t.hpp"
 #include "user_agent.hpp"
+#include "gzstream.hpp"
 
 #include <cctype>
 
@@ -14,6 +15,7 @@
 
 #include <stdexcept>
 
+#include <memory>
 #include <functional>
 
 #include <boost/asio.hpp>
@@ -59,6 +61,16 @@ inline std::ostream& operator << (std::ostream& o, const streambuf_t& b)
 inline streambuf_t streambuf_view(const boost::asio::streambuf& stream)
 {
     return streambuf_t{stream};
+}
+
+inline sss::string_view cast_string_view(const boost::asio::streambuf& streambuf)
+{
+    int buf_size = streambuf.size();
+    boost::asio::streambuf::const_buffers_type::const_iterator begin(
+        streambuf.data().begin());
+    const char* ptr = boost::asio::buffer_cast<const char*>(*begin);
+    sss::string_view buf(ptr, buf_size);
+    return sss::string_view(ptr, buf_size);
 }
 
 struct pretty_ec_t
@@ -219,7 +231,9 @@ public:
           m_has_eof(false),
           m_chunked_transfer(false),
           m_chunk_size(0),
+          m_response_content_length(-1),
           m_max_redirect(5),
+          m_is_gzip(false),
           m_request(2048),
           m_response(2048)
     {
@@ -244,7 +258,7 @@ public:
     void                    setOnContent(onResponce_t&& func)  { m_onContent  = std::move(func); }
     void                    setOnEndCheck(onEndCheck_t&& func) { m_onEndCheck = std::move(func); }
 
-    ss1x::http::Headers&    header()                           { return m_headers;                     }
+    ss1x::http::Headers&    header()                           { return m_response_headers;                     }
     ss1x::http::Headers&    request_header()                   { return m_request_headers;             }
     bool                    eof() const                        { return m_has_eof;                     }
 
@@ -476,6 +490,7 @@ private:
         }
         COLOG_DEBUG("proxy_status:http version: ", version_major, '.', version_minor);
 
+        // TODO 按行拆分 proxy header 的处理
         boost::asio::async_read_until(
             sock, m_response, "\r\n\r\n",
             boost::bind(&proxy_tunnel_client::handle_https_proxy_header<Stream>,
@@ -497,8 +512,10 @@ private:
         }
         boost::system::error_code ec;
         // Process the response headers from proxy server.
-        std::istream response_stream(&m_response);
-        processHeader(m_headers, response_stream);
+        // std::istream response_stream(&m_response);
+        m_response_headers.clear();
+        processHeader(m_response_headers, cast_string_view(m_response));
+        // processHeader(m_response_headers, response_stream);
 
         // Write whatever content we already have to output.
         if (m_response.size() > 0 && this->header().status_code == 200) {
@@ -534,9 +551,11 @@ private:
             return;
         }
         auto it = request_header.find(field);
-        if (it != request_header.end() && !it->second.empty())
+        if (it != request_header.end())
         {
-            request_stream << field << ": " << it->second << "\r\n";
+            if (!it->second.empty()) {
+                request_stream << field << ": " << it->second << "\r\n";
+            }
         }
         else if (!default_value.empty()) {
             request_stream << field << ": " << default_value << "\r\n";
@@ -638,10 +657,22 @@ private:
             request_stream << "Host: " << m_proxy_hostname << "\r\n";
         }
         used_field.insert("Host");
+        // 另外，可能还需要根据html标签类型的不同，来限制可以获取的类型；
+        // 比如img的话，就获取
+        // Accept: image/webp,image/*,*/*;q=0.8
+        // 当然，禁用，也是一个选择。
         requestStreamHelper(used_field, m_request_headers, request_stream, "Accept", "text/html, application/xhtml+xml, */*");
+        // NOTE 部分网站，比如 http://i.imgur.com/lYQgi0R.gif 必须要提供 (Accept-Encoding "gzip, deflate, sdch") 参数；
+        // 不然，无法正常从图床获取图片，而是给你一个frame，再显示图片。
+        // requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "gzip, deflate, sdch");
+        // 参考： https://imququ.com/post/vary-header-in-http.html
+        requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "gzip, deflate, sdch");
         processRequestCookie(request_stream, std::get<1>(url_info), std::get<3>(url_info));
         used_field.insert("Cookie");
         requestStreamHelper(used_field, m_request_headers, request_stream, "User-Agent", USER_AGENT_DEFAULT);
+        // NOTE Connection 选项 等于 close和keep-alive的区别在于，keep-alive的时候，服务器端，不会主动关闭通信，也就是没有eof传来。
+        // 这需要客户端，自动分析包大小，进行消息拆分。
+        // 比如，分析：Content-Length: 4376 字段
         requestStreamHelper(used_field, m_request_headers, request_stream, "Connection", "close");
         requestStreamDumpRest(used_field, m_request_headers, request_stream);
         request_stream << "\r\n";
@@ -727,42 +758,92 @@ private:
         // 另外，大部分浏览器，处理header的时候，都是定义一个最大空间。比如2048；
         // 这里的话，可以一个kv，限制最大长度是1024；然后可以有256个kv值对；
         // 等等；
+
+        m_response_headers.clear();
+
         boost::asio::async_read_until(
-            m_socket, m_response, "\r\n\r\n",
+            m_socket, m_response, "\r\n",
             boost::bind(&proxy_tunnel_client::handle_read_header, this,
                         boost::asio::placeholders::bytes_transferred,
                         boost::asio::placeholders::error));
     }
 
-    void processHeader(ss1x::http::Headers& headers, std::istream& response_stream)
+    void processHeader(ss1x::http::Headers& headers, sss::string_view head_line_view)
     {
-        headers.clear();
+        if (!head_line_view.empty() && !head_line_view.is_end_with("\r\n")) {
+            SSS_POSITION_THROW(std::runtime_error, "not end with \"\\r\\n\"");
+        }
+        auto pos = 0;
 
-        std::string header;
-        // NOTE 在这里处理3xx(301,302)跳转！
-        while (std::getline(response_stream, header) && header != "\r") {
-            size_t colon_pos = header.find(':');
-            if (header.back() == '\r') {
-                header.pop_back();
+        while (!head_line_view.empty()) {
+            auto end_pos = head_line_view.find("\r\n", pos);
+            if (end_pos == sss::string_view::npos) {
+                // NOTE someting wrong
+                break;
             }
+            auto line = head_line_view.substr(0, end_pos);
+            if (line.empty()) {
+                // 说明，传入的是空行
+                break;
+            }
+            head_line_view = head_line_view.substr(end_pos + 2);
+            size_t colon_pos = line.find(':');
+
             if (colon_pos == std::string::npos) {
+                // NOTE someting wrong
                 continue;
             }
             size_t value_beg =
-                header.find_first_not_of("\t ", colon_pos + 1);
+                line.find_first_not_of("\t ", colon_pos + 1);
             if (value_beg == std::string::npos) {
-                value_beg = header.length();
+                value_beg = line.length();
             }
             // NOTE descard the last '\r'
-            size_t len = header.length() - value_beg;
-            std::string key = header.substr(0, colon_pos);
-            std::string value = header.substr(value_beg, len);
-            headers[key] = value;
+            size_t len = line.length() - value_beg;
+            auto key = line.substr(0, colon_pos).to_string();
+            auto value = line.substr(value_beg, len).to_string();
+            // NOTE 多值的key，通过"\r\n"为间隔，串接在一起。
+            // TODO 或许，应该用vector来保存header；
+            if (!headers[key].empty()) {
+                headers[key].append("\r\n");
+            }
+            headers[key].append(value);
 
-            // NOTE TODO 或许，应该用vector来保存header；
-            COLOG_DEBUG(sss::raw_string(header));
+            if (key == "Content-Length") {
+                m_response_content_length = sss::string_cast<uint32_t>(value);
+            }
+
+            COLOG_DEBUG(sss::raw_string(line));
         }
     }
+
+    // void processHeader(ss1x::http::Headers& headers, std::istream& response_stream)
+    // {
+    //     std::string header;
+
+    //     while (std::getline(response_stream, header) && header != "\r") {
+    //         size_t colon_pos = header.find(':');
+    //         if (header.back() == '\r') {
+    //             header.pop_back();
+    //         }
+    //         if (colon_pos == std::string::npos) {
+    //             continue;
+    //         }
+    //         size_t value_beg =
+    //             header.find_first_not_of("\t ", colon_pos + 1);
+    //         if (value_beg == std::string::npos) {
+    //             value_beg = header.length();
+    //         }
+    //         // NOTE descard the last '\r'
+    //         size_t len = header.length() - value_beg;
+    //         std::string key = header.substr(0, colon_pos);
+    //         std::string value = header.substr(value_beg, len);
+    //         headers[key] = value;
+
+    //         // NOTE TODO 或许，应该用vector来保存header；
+    //         COLOG_DEBUG(sss::raw_string(header));
+    //     }
+    // }
 
     void handle_read_header(int bytes_transferred, const boost::system::error_code& err)
     {
@@ -778,11 +859,64 @@ private:
         // 假设header每个有效行，不会超过1024byte。
         // 超过的，按错误处理。
         // Process the response headers.
-        std::istream response_stream(&m_response);
 
-        processHeader(m_headers, response_stream);
+        // avhttp中，是用一个std::string，作为临时buffer，不断读取字符，直到读取到仅"\r\n"
+        // 的header结束标记为止；
+        // 之后，才一股脑，完成header的解析。
+        // 这确实是一种，逃避"\r\n"状态拆分的方法，虽然看起来好像会不断分配内存……
+        // 而且，内存没有复用。
+        //
+        // /home/sarrow/Sources/avhttp/include/avhttp/impl/http_stream.ipp:2065
+        //
+        // template <typename Handler>
+        // void http_stream::handle_header(Handler handler,
+        //  std::string header_string, int bytes_transferred, const boost::system::error_code& err)
+        // 
+        // 注意，函数接口中，header_string是值传递！
+        //
+        // 初始调用形如：
+        //
+		// // 异步读取所有Http header部分.
+		// boost::asio::async_read_until(m_sock, m_response, "\r\n",
+		// 	boost::bind(&http_stream::handle_header<Handler>,
+		// 		this, handler, std::string(""),
+		// 		boost::asio::placeholders::bytes_transferred,
+		// 		boost::asio::placeholders::error
+		// 	)
+		// );
+        if (bytes_transferred > 2) {
+            auto line = cast_string_view(m_response).substr(0, bytes_transferred);
+            if (line.is_end_with("\r\n")) {
+                processHeader(m_response_headers, line);
+                m_response.consume(line.size());
+                // fall through
+            }
+            else if (line.is_end_with("\r")) {
+                boost::asio::async_read_until(
+                    m_socket, m_response, "\n",
+                    boost::bind(&proxy_tunnel_client::handle_read_header, this,
+                                boost::asio::placeholders::bytes_transferred,
+                                boost::asio::placeholders::error));
+                return;
+            }
 
-        COLOG_DEBUG(m_headers);
+            boost::asio::async_read_until(
+                m_socket, m_response, "\r\n",
+                boost::bind(&proxy_tunnel_client::handle_read_header, this,
+                            boost::asio::placeholders::bytes_transferred,
+                            boost::asio::placeholders::error));
+            return;
+            // NOTE 如果header的单行，都会"爆栈"，那么说明有"攻击"行为。
+        }
+        else if (bytes_transferred < 2) {
+            COLOG_ERROR("left byts count :", bytes_transferred);
+            return;
+        }
+
+        // NOTE 此时 bytes_transferred == 2并且，responce的buf中，必须为"\r\n"。
+        m_response.consume(2);
+
+        COLOG_DEBUG(m_response_headers);
 
         bool redirect = false;
 
@@ -792,8 +926,8 @@ private:
             case 301:
             case 302:
                 {
-                    const auto it = m_headers.find("Location");
-                    if (it != m_headers.end()) {
+                    const auto it = m_response_headers.find("Location");
+                    if (it != m_response_headers.end()) {
                         if (!it->second.empty() && it->second != this->get_url()) {
                             redirect = true;
                             auto newLocation = ss1x::util::url::full_of_copy(it->second, this->get_url());
@@ -801,13 +935,14 @@ private:
                             this->m_redirect_urls.push_back(newLocation);
                         }
                         else {
+                            COLOG_ERROR(m_response_headers);
                             COLOG_ERROR(it->second, " invalid");
                             set_error_code(ss1x::errc::invalid_redirect);
                             return;
                         }
                     }
                     else {
-                        COLOG_ERROR("con not found Location");
+                        COLOG_ERROR("new Location can not be found.");
                         set_error_code(ss1x::errc::redirect_not_found);
                         return;
                     }
@@ -815,7 +950,7 @@ private:
                 break;
 
             case 200:
-                if (m_headers.has_kv("Transfer-Encoding", "chunked")) { // 将chunked处理，移动到跳转的后面
+                if (m_response_headers.has_kv("Transfer-Encoding", "chunked")) { // 将chunked处理，移动到跳转的后面
                     this->m_chunked_transfer = true;
                     COLOG_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
                 }
@@ -839,6 +974,27 @@ private:
             }
         }
 
+        if (m_onContent && m_response_headers.has("Content-Encoding")) {
+            m_is_gzip = true;
+            const auto& content_encoding = m_response_headers.get("Content-Encoding");
+            if (content_encoding == "gzip") {
+                m_gzstream.reset(new ss1x::gzstream(ss1x::gzstream::mt_gzip));
+            }
+            else if (content_encoding == "zlib") {
+                m_gzstream.reset(new ss1x::gzstream(ss1x::gzstream::mt_zlib));
+            }
+            else if (content_encoding == "deflate") {
+                m_gzstream.reset(new ss1x::gzstream(ss1x::gzstream::mt_deflate));
+            }
+            else {
+                m_is_gzip = false;
+            }
+
+            if (m_gzstream) {
+                m_gzstream->set_on_avail_out(m_onContent);
+            }
+        }
+
         if (m_chunked_transfer) {
             boost::asio::async_read_until(
                 m_socket, m_response, "\r\n",
@@ -848,12 +1004,19 @@ private:
         }
         else {
             // Write whatever content we already have to output.
+            if (m_response.size() && m_response_content_length != -1) {
+                m_response_content_length -= m_response.size();
+            }
             if (m_response.size() > 0 && this->header().status_code == 200) {
                 COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
                 consume_content(m_response);
             }
             else {
                 discard(m_response);
+            }
+
+            if (!m_response_content_length) {
+                return;
             }
             // NOTE 如果正文过短的话，可能到这里，已经读完socket缓存了。
             // Start reading remaining data until EOF.
@@ -921,6 +1084,11 @@ private:
             return;
         }
 
+        if (m_is_gzip && m_gzstream) {
+            // NOTE 这样做，是否有必要？
+            m_gzstream->init();
+        }
+
         boost::asio::async_read(
             m_socket, m_response, boost::asio::transfer_exactly(m_chunk_size),
             boost::bind(&proxy_tunnel_client::handle_read_content, this,
@@ -933,7 +1101,7 @@ private:
     {
         COLOG_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
         std::ostream request_stream(&m_request);
-        // NOTE 可以从 m_headers 中，构造http-head。
+        // NOTE 可以从 m_response_headers 中，构造http-head。
         request_stream << "POST " << path << " HTTP/1.0\r\n";
         request_stream << "Host: " << server << "\r\n";
 
@@ -1063,7 +1231,10 @@ private:
         }
 
         // Write all of the data that has been read so far.
-        bool is_end = (!m_chunked_transfer && this->is_end_chunk(m_response)) || (m_chunked_transfer && !m_chunk_size);
+        bool is_end = (!m_chunked_transfer &&
+                       (m_response_content_length == bytes_transferred ||
+                        this->is_end_chunk(m_response))) ||
+                      (m_chunked_transfer && !m_chunk_size);
         if (m_onContent && this->header().status_code == 200) {
             consume_content(m_response, bytes_transferred);
         }
@@ -1073,7 +1244,7 @@ private:
         COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
         if (is_end) {
-            COLOG_ERROR("is_end_chunk");
+            COLOG_DEBUG("is_end_chunk");
             set_error_code(boost::asio::error::eof);
             return;
         }
@@ -1144,6 +1315,9 @@ private:
             }
         }
         else {
+            if (!m_response_content_length) {
+                return;
+            }
             boost::asio::async_read(
                 m_socket, m_response, boost::asio::transfer_at_least(1),
                 boost::bind(&proxy_tunnel_client::handle_read_content, this,
@@ -1278,13 +1452,27 @@ protected:
                         COLOG_DEBUG("left ", m_chunk_size);
                 }
             }
-            m_onContent(sv);
+            else {
+                if (m_response_content_length != -1) {
+                    m_response_content_length -= bytes_transferred;
+                }
+            }
+            if (m_is_gzip) {
+                if (!m_gzstream) {
+                    SSS_POSITION_THROW(std::runtime_error, "m_is_gzip, m_gzstream not match!");
+                }
+                m_gzstream->inflate(sv);
+            }
+            else {
+                m_onContent(sv);
+            }
             responce.consume(size);
         }
         else {
             discard(responce, bytes_transferred);
         }
     }
+
     bool is_end_chunk(const boost::asio::streambuf& buf) const
     {
         if (!m_onEndCheck) {
@@ -1307,17 +1495,21 @@ private:
     //! http://blog.csdn.net/whatday/article/details/7571451
     bool                           m_chunked_transfer;
     int32_t                        m_chunk_size;
+    int32_t                        m_response_content_length;
     // 最大跳转次数
     // 0 表示，不允许跳转；
     // 1 表示可以跳转一次；以此类推
     size_t                         m_max_redirect;
+
+    bool                            m_is_gzip;
+    std::unique_ptr<ss1x::gzstream> m_gzstream;
 
     boost::asio::streambuf         m_request;
     boost::asio::streambuf         m_response;
 
     // TODO 也许，应该将header分开,request,responce
     // 不过，对于header()函数来说，用户一般只关心responce的header。
-    ss1x::http::Headers            m_headers;
+    ss1x::http::Headers            m_response_headers;
     ss1x::http::Headers            m_request_headers;
     boost::system::error_code      m_ec;
     std::string                    m_proxy_hostname;
