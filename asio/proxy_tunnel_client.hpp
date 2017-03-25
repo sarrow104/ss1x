@@ -131,79 +131,107 @@ bool parse_http_status_line(Iterator begin, Iterator end,
 		case http_version_h:
 			state = (c == 'H') ? http_version_t_1 : fail;
 			break;
+
 		case http_version_t_1:
 			state = (c == 'T') ? http_version_t_2 : fail;
 			break;
+
 		case http_version_t_2:
 			state = (c == 'T') ? http_version_p : fail;
 			break;
+
 		case http_version_p:
 			state = (c == 'P') ? http_version_slash : fail;
 			break;
+
 		case http_version_slash:
 			state = (c == '/') ? http_version_major_start : fail;
 			break;
+
 		case http_version_major_start:
 			if (std::isdigit(c))
 			{
 				version_major = version_major * 10 + c - '0';
 				state = http_version_major;
 			}
-			else
-				state = fail;
+			else {
+                state = fail;
+            }
 			break;
-		case http_version_major:
-			if (c == '.')
-				state = http_version_minor_start;
-			else if (std::isdigit(c))
-				version_major = version_major * 10 + c - '0';
-			else
-				state = fail;
-			break;
+
+        case http_version_major:
+            if (c == '.') {
+                state = http_version_minor_start;
+            }
+            else if (std::isdigit(c)) {
+                version_major = version_major * 10 + c - '0';
+            }
+            else {
+                state = fail;
+            }
+            break;
+
 		case http_version_minor_start:
 			if (std::isdigit(c))
 			{
 				version_minor = version_minor * 10 + c - '0';
 				state = http_version_minor;
 			}
-			else
-				state = fail;
+			else {
+                state = fail;
+            }
 			break;
+
 		case http_version_minor:
-			if (c == ' ')
+			if (c == ' ') {
 				state = status_code_start;
-			else if (std::isdigit(c))
-				version_minor = version_minor * 10 + c - '0';
-			else
-				state = fail;
+            }
+			else if (std::isdigit(c)) {
+                version_minor = version_minor * 10 + c - '0';
+            }
+			else {
+                state = fail;
+            }
 			break;
+
 		case status_code_start:
 			if (std::isdigit(c))
 			{
 				status = status * 10 + c - '0';
 				state = status_code;
 			}
-			else
-				state = fail;
+			else {
+                state = fail;
+            }
 			break;
+
 		case status_code:
-			if (c == ' ')
-				state = reason_phrase;
-			else if (std::isdigit(c))
-				status = status * 10 + c - '0';
-			else
-				state = fail;
-			break;
-		case reason_phrase:
-			if (c == '\r')
-				state = linefeed;
-			else if (std::iscntrl(c))
-				state = fail;
-			else
-				reason.push_back(c);
-			break;
-		case linefeed:
-			return (c == '\n');
+            if (c == ' ') {
+                state = reason_phrase;
+            }
+            else if (std::isdigit(c)) {
+                status = status * 10 + c - '0';
+            }
+            else {
+                state = fail;
+            }
+            break;
+
+        case reason_phrase:
+            if (c == '\r') {
+                state = linefeed;
+            }
+            else if (std::iscntrl(c)) {
+                state = fail;
+            }
+            else {
+                reason.push_back(c);
+            }
+            break;
+
+        case linefeed:
+            return (c == '\n');
+
 		default:
 			return false;
 		}
@@ -235,7 +263,8 @@ public:
           m_max_redirect(5),
           m_is_gzip(false),
           m_request(2048),
-          m_response(2048)
+          m_response(2048),
+          m_deadline(io_service)
     {
         
         COLOG_DEBUG(m_request.max_size());
@@ -258,7 +287,7 @@ public:
     void                    setOnContent(onResponce_t&& func)  { m_onContent  = std::move(func); }
     void                    setOnEndCheck(onEndCheck_t&& func) { m_onEndCheck = std::move(func); }
 
-    ss1x::http::Headers&    header()                           { return m_response_headers;                     }
+    ss1x::http::Headers&    header()                           { return m_response_headers;            }
     ss1x::http::Headers&    request_header()                   { return m_request_headers;             }
     bool                    eof() const                        { return m_has_eof;                     }
 
@@ -305,9 +334,45 @@ private:
         http_get_impl(std::get<1>(url_info), std::get<2>(url_info), std::get<3>(url_info));
     }
 
+    // const boost::system::error_code& err
+    void check_deadline()
+    {
+        // if (err && err !=boost::asio::error::eof) {
+        //     this->m_socket.get_socket().cancel(); 
+        //     return;
+        // }
+        // Check whether the deadline has passed. We compare the deadline against 
+        // the current time since a new asynchronous operation may have moved the 
+        // deadline before this actor had a chance to run. 
+
+        if (m_deadline.expires_at() <= boost::asio::deadline_timer::traits_type::now()) 
+        { 
+            // The deadline has passed. The socket is closed so that any outstanding 
+            // asynchronous operations are cancelled. 
+
+            this->m_socket.get_socket().close(); 
+
+            // There is no longer an active deadline. The expiry is set to positive 
+            // infinity so that the actor takes no action until a new deadline is set. 
+            m_deadline.expires_at(boost::posix_time::pos_infin); 
+
+            throw "Time out : deadline on client!"; 
+        } 
+
+        // Put the actor back to sleep. 
+        m_deadline.async_wait(boost::bind(&proxy_tunnel_client::check_deadline, this)); 
+    }
+
     void http_get_impl(const std::string& server, int port, const std::string& path)
     {
         COLOG_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
+
+        // m_deadline.async_wait(boost::bind(&proxy_tunnel_client::check_deadline, this)); 
+
+        // //TODO magic number
+        // m_deadline.expires_from_now(boost::posix_time::seconds(5 * 60)); 
+
+        // std::cout << __PRETTY_FUNCTION__ << std::endl;
 
         char port_buf[10];
         std::sprintf(port_buf, "%d", port <= 0 ? 80 : port);
@@ -1461,7 +1526,10 @@ protected:
                 if (!m_gzstream) {
                     SSS_POSITION_THROW(std::runtime_error, "m_is_gzip, m_gzstream not match!");
                 }
-                m_gzstream->inflate(sv);
+                int covert_cnt = m_gzstream->inflate(sv);
+                if (covert_cnt <= 0) {
+                    SSS_POSITION_THROW(std::runtime_error, "inflate error!");
+                }
             }
             else {
                 m_onContent(sv);
@@ -1506,6 +1574,8 @@ private:
 
     boost::asio::streambuf         m_request;
     boost::asio::streambuf         m_response;
+
+    boost::asio::deadline_timer    m_deadline;
 
     // TODO 也许，应该将header分开,request,responce
     // 不过，对于header()函数来说，用户一般只关心responce的header。
