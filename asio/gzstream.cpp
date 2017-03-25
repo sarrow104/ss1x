@@ -30,11 +30,11 @@ void gzstream::init(method_t m)
         inflateEnd(&m_stream);
     }
 
-    // NOTE Í¨¹ı !m_stream.zalloc ¿ÉÒÔÅĞ¶Ïz_streamÊÇ·ñ³õÊ¼»¯ÁË¡£
+    // NOTE é€šè¿‡ !m_stream.zalloc å¯ä»¥åˆ¤æ–­z_streamæ˜¯å¦åˆå§‹åŒ–äº†ã€‚
     if (Z_OK !=
-        inflateInit2(&m_stream, windowBits))  // ³õÊ¼»¯ZLIB¿â,
-                                              // Ã¿´Î½âÑ¹Ã¿¸öchunkedµÄÊ±ºò,
-                                              // ²»ĞèÒªÖØĞÂ³õÊ¼»¯.
+        inflateInit2(&m_stream, windowBits))  // åˆå§‹åŒ–ZLIBåº“,
+                                              // æ¯æ¬¡è§£å‹æ¯ä¸ªchunkedçš„æ—¶å€™,
+                                              // ä¸éœ€è¦é‡æ–°åˆå§‹åŒ–.
     {
         boost::system::error_code ec =
             boost::asio::error::operation_not_supported;
@@ -54,14 +54,15 @@ int gzstream::inflate(const char * data, size_t size)
     int bytes_transferred = 0;
     while (m_stream.avail_in > 0) {
         m_stream.avail_out =
-            sizeof(m_zlib_buffer);  // Êä³öÎ»ÖÃ£¬Á¬Ğø¿ÕÏĞÄÚ´æÇøÓò³¤¶È
-        m_stream.next_out = (Bytef *)m_zlib_buffer;  // ÏÂÒ»¸öÊä³öÎ»ÖÃµØÖ·£»
+            sizeof(m_zlib_buffer);  // è¾“å‡ºä½ç½®ï¼Œè¿ç»­ç©ºé—²å†…å­˜åŒºåŸŸé•¿åº¦
+        m_stream.next_out = (Bytef *)m_zlib_buffer;  // ä¸‹ä¸€ä¸ªè¾“å‡ºä½ç½®åœ°å€ï¼›
         int ret = ::inflate(&m_stream, Z_SYNC_FLUSH);
         if (ret < 0) {
             boost::system::error_code err =
                 boost::asio::error::operation_not_supported;
-            // ½âÑ¹·¢Éú´íÎó, Í¨ÖªÓÃ»§²¢·ÅÆú´¦Àí.
+            // è§£å‹å‘ç”Ÿé”™è¯¯, é€šçŸ¥ç”¨æˆ·å¹¶æ”¾å¼ƒå¤„ç†.
             COLOG_ERROR(err.message());
+            return 0;
         }
         auto current_cnt = sizeof(m_zlib_buffer) - m_stream.avail_out;
         if (m_on_avail_out) {
