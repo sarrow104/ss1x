@@ -4,7 +4,7 @@ date:2016-03-01
 
 ======================================================================
 
-ÈçºÎÖ§³Ö ´Ó´úÀí·þÎñÆ÷»ñÈ¡Êý¾Ý£¿
+å¦‚ä½•æ”¯æŒ ä»Žä»£ç†æœåŠ¡å™¨èŽ·å–æ•°æ®ï¼Ÿ
 
 http://stackoverflow.com/questions/11523829/how-to-add-proxy-support-to-boostasio
 
@@ -46,45 +46,45 @@ void doDownLoad(const std::string &in_server, const std::string &in_path, std::o
 
 ----------------------------------------------------------------------
 
-¼òÑÔÖ®£¬¾ÍÊÇÔÚÊ¹ÓÃ´úÀíµÄÊ±ºò£¬ÓÃ´úÀí·þÎñÆ÷µÄÓòÃû¡¢¶Ë¿ÚºÅ£¬´úÌæÔ­ÓÐÄ¿±êµÄÓòÃûºÍ¶Ë
-¿ÚºÅ£»Ö»ÓÐÇëÇóµÄÂ·¾¶£¬ÔòÓÃÄ¿±êµÄÍêÕûurlÂ·¾¶´úÌæ¡ª¡ªµ±È»£¬Èç¹ûÓÐ¶Ë¿ÚºÅµÄ»°£¬Ò²Ðè
-Òª¼ÓÉÏ¶Ë¿ÚºÅ£»
+ç®€è¨€ä¹‹ï¼Œå°±æ˜¯åœ¨ä½¿ç”¨ä»£ç†çš„æ—¶å€™ï¼Œç”¨ä»£ç†æœåŠ¡å™¨çš„åŸŸåã€ç«¯å£å·ï¼Œä»£æ›¿åŽŸæœ‰ç›®æ ‡çš„åŸŸåå’Œç«¯
+å£å·ï¼›åªæœ‰è¯·æ±‚çš„è·¯å¾„ï¼Œåˆ™ç”¨ç›®æ ‡çš„å®Œæ•´urlè·¯å¾„ä»£æ›¿â€”â€”å½“ç„¶ï¼Œå¦‚æžœæœ‰ç«¯å£å·çš„è¯ï¼Œä¹Ÿéœ€
+è¦åŠ ä¸Šç«¯å£å·ï¼›
 
 ----------------------------------------------------------------------
 
-** ¹ØÓÚ getFile()
+** å…³äºŽ getFile()
 
-Ó¦ÓÃ³¡¾°ÊÇ£¬ÕâÑù£»
+åº”ç”¨åœºæ™¯æ˜¯ï¼Œè¿™æ ·ï¼›
 
-½âÎöhtmlÎÄ±¾ºó£¬·¢ÏÖÓÐÒ»¸öÁ´½Ó£»Õâ¸öÁ´½ÓÓÐÕâ¼¸ÖÖÇé¿ö£º
-1. ÊÇÒ»¸ö¾ø¶ÔÁ´½Ó£¨°üº¬Ð­Òé¡¢ÓòÃû¡¢¶Ë¿Ú£¬ÒÔ¼°ÃüÁîÂ·¾¶£©£»
-2. ÊÇÒ»¸öÏà¶ÔÁ´½Ó£¨Ö»ÓÐÏà¶ÔÂ·¾¶·½Ê½µÄÃüÁîÂ·¾¶£©
-3. ÊÇÒ»¸öÊ¡ÂÔÁËÐ­Òé¡¢ÓòÃû£¬ÒÔ¼°¶Ë¿ÚºÅµÄ¾ø¶ÔÃüÁîÂ·¾¶£»
+è§£æžhtmlæ–‡æœ¬åŽï¼Œå‘çŽ°æœ‰ä¸€ä¸ªé“¾æŽ¥ï¼›è¿™ä¸ªé“¾æŽ¥æœ‰è¿™å‡ ç§æƒ…å†µï¼š
+1. æ˜¯ä¸€ä¸ªç»å¯¹é“¾æŽ¥ï¼ˆåŒ…å«åè®®ã€åŸŸåã€ç«¯å£ï¼Œä»¥åŠå‘½ä»¤è·¯å¾„ï¼‰ï¼›
+2. æ˜¯ä¸€ä¸ªç›¸å¯¹é“¾æŽ¥ï¼ˆåªæœ‰ç›¸å¯¹è·¯å¾„æ–¹å¼çš„å‘½ä»¤è·¯å¾„ï¼‰
+3. æ˜¯ä¸€ä¸ªçœç•¥äº†åè®®ã€åŸŸåï¼Œä»¥åŠç«¯å£å·çš„ç»å¯¹å‘½ä»¤è·¯å¾„ï¼›
 
-¶ÔÓÚÇé¿ö1£¬²»ÓÃËµ£¬ÐÅÏ¢ÍêÕû£¬¿ÉÒÔÊ¹ÓÃ£»
+å¯¹äºŽæƒ…å†µ1ï¼Œä¸ç”¨è¯´ï¼Œä¿¡æ¯å®Œæ•´ï¼Œå¯ä»¥ä½¿ç”¨ï¼›
 
-¶ÔÓÚÇé¿ö2¡¢Çé¿ö3£¬¾ÍÐèÒªÒ»¸öRefererÐÅÏ¢£»
+å¯¹äºŽæƒ…å†µ2ã€æƒ…å†µ3ï¼Œå°±éœ€è¦ä¸€ä¸ªRefererä¿¡æ¯ï¼›
 
 https://en.wikipedia.org/wiki/HTTP_referer
 http://smerity.com/articles/2013/where_did_all_the_http_referrers_go.html
 
-¼òÑÔÖ®£¬ÓÉÓÚ Referer Óò£¬¿ÉÄÜÐ¯´øÃô¸ÐÐÅÏ¢£¨±ÈÈç£¬Ä³Ð©¹Ø¼üµÄ×Ö¶Î£¬ÈçÓÃ»§Ãû¡¢ÃÜÂë
-£¬±»±àÂëµ½uriµØÖ·ÀïÃæ£©
+ç®€è¨€ä¹‹ï¼Œç”±äºŽ Referer åŸŸï¼Œå¯èƒ½æºå¸¦æ•æ„Ÿä¿¡æ¯ï¼ˆæ¯”å¦‚ï¼ŒæŸäº›å…³é”®çš„å­—æ®µï¼Œå¦‚ç”¨æˆ·åã€å¯†ç 
+ï¼Œè¢«ç¼–ç åˆ°uriåœ°å€é‡Œé¢ï¼‰
 
 ----------------------------------------------------------------------
 
-** ²Î¿¼
+** å‚è€ƒ
 
-¡ºHTTP Made Really Easy¡»
+ã€ŽHTTP Made Really Easyã€
 
 http://www.jmarshall.com/easy/http/
 
-¡ºÊ¹ÓÃsslµÄproxy£¬asioÏÂÔØÆ÷£¬ÊµÑéÐÔ´úÂë¡»
+ã€Žä½¿ç”¨sslçš„proxyï¼Œasioä¸‹è½½å™¨ï¼Œå®žéªŒæ€§ä»£ç ã€
 http://lists.boost.org/boost-users/2010/08/62116.php
 
 HTTP Request fields
 https://www.w3.org/Protocols/HTTP/HTRQ_Headers.html
 https://www.w3.org/Protocols/
 
-URL Óë URLµÄÇø±ð
+URL ä¸Ž URLçš„åŒºåˆ«
 https://www.zhihu.com/question/21950864
