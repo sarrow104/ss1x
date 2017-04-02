@@ -1526,8 +1526,10 @@ protected:
                 if (!m_gzstream) {
                     SSS_POSITION_THROW(std::runtime_error, "m_is_gzip, m_gzstream not match!");
                 }
-                int covert_cnt = m_gzstream->inflate(sv);
-                if (covert_cnt <= 0) {
+                int ec = 0;
+                int covert_cnt = m_gzstream->inflate(sv, &ec);
+                if (ec < 0 && ec != Z_BUF_ERROR && covert_cnt <= 0) {
+                    COLOG_ERROR(SSS_VALUE_MSG(ec));
                     SSS_POSITION_THROW(std::runtime_error, "inflate error!");
                 }
             }
