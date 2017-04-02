@@ -68,10 +68,10 @@ struct gzstream
         this->init(m_method);
     }
 
-    int  inflate(const char * data, size_t size);
-    int  inflate(sss::string_view sv)
+    int  inflate(const char * data, size_t size, int* p_ec = nullptr);
+    int  inflate(sss::string_view sv, int * p_ec = nullptr)
     {
-        return inflate(sv.data(), sv.size());
+        return inflate(sv.data(), sv.size(), p_ec);
     }
 };
 } // namespace ss1x
