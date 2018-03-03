@@ -3,6 +3,10 @@
 
 #include <string>
 #include <tuple>
+#include <map>
+
+#include <sss/spliter.hpp>
+#include <sss/string_view.hpp>
 
 namespace ss1x {
 namespace parser {
@@ -30,14 +34,36 @@ inline auto split_port_auto(const std::string& url) -> decltype(ss1x::util::url:
         else if (std::get<0>(url_info) == "https"){
             std::get<2>(url_info) = 443;
         }
-        else {
-            std::get<2>(url_info) = 80;
-        }
+//         else {
+//             std::get<2>(url_info) = 80;
+//         }
     }
     if (std::get<3>(url_info).empty()) {
         std::get<3>(url_info) = "/";
     }
     return url_info;
+}
+
+inline std::tuple<std::string, std::map<std::string, std::string>> path_split_params(const std::string& path)
+{
+    std::string path_simple;
+    std::map<std::string, std::string> params;
+    sss::ViewSpliter<char> sp(path, '?');
+    sss::string_view path_sv;
+    sss::string_view params_sv;
+    sp.fetch(path_sv) && sp.fetch(params_sv);
+    if (!params_sv.empty()) {
+        sss::string_view kv_sv;
+        sss::ViewSpliter<char> sp_kv_pair(params_sv, '&');
+        while (sp_kv_pair.fetch(kv_sv)) {
+            sss::ViewSpliter<char> sp_kv(kv_sv, '=');
+            sss::string_view key;
+            sss::string_view value;
+            sp_kv.fetch(key) && sp_kv.fetch(value);
+            params.emplace(key.to_string(), value.to_string());
+        }
+    }
+    return std::make_tuple(path_sv.to_string(), params);
 }
 
 std::string join(
