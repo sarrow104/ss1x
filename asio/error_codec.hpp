@@ -218,6 +218,12 @@ enum errc_t
 	/// SOCKS no identd running.
 	socks_identd_error,
 
+    /// DEADLIME_TIMER runout
+    deadline_timer_error,
+
+    /// USER-int ctrl-c runout
+    user_ctrl_c_error,
+
 	/// Fake continue!
 	fake_continue
 };
@@ -374,6 +380,10 @@ class error_category_impl
 			return "SOCKS no identd running";
 		case errc::socks_identd_error:
 			return "SOCKS no identd running";
+        case errc::deadline_timer_error:
+            return "DEADLIME_TIMER runout";
+        case errc::user_ctrl_c_error:
+            return "User CTRL-C error";
 		case errc::fake_continue:
 			return "Fake continue";
 		default:
