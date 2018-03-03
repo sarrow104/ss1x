@@ -1,5 +1,8 @@
 #pragma once
 
+// client + deadline_timer, see
+// http://www.boost.org/doc/libs/1_45_0/doc/html/boost_asio/example/timeouts/async_tcp_client.cpp
+
 #include "socket_t.hpp"
 #include "user_agent.hpp"
 #include "gzstream.hpp"
@@ -28,10 +31,115 @@
 #include <sss/string_view.hpp>
 #include <sss/utlstring.hpp>
 #include <sss/hex_print.hpp>
+#include <sss/algorithm.hpp>
 
 #include <ss1x/asio/headers.hpp>
 #include <ss1x/asio/error_codec.hpp>
 #include <ss1x/asio/utility.hpp>
+
+inline sss::string_view cast_string_view(const boost::asio::streambuf& streambuf)
+{
+    return sss::string_view(boost::asio::buffer_cast<const char*>(streambuf.data()), streambuf.size());
+}
+
+//this->m_deadline.cancel(); 
+//m_deadline.expires_from_now(boost::posix_time::seconds(5));
+#define RET_ON_STOP  do { \
+    if (m_stoped) {\
+        return; \
+    }\
+    else {\
+        this->resetTimer(); \
+    }\
+} while(false);
+
+namespace detail {
+
+// NOTE error_code 模式下，用不着异常！
+// class ExceptDeadlineTimer : public std::runtime_error {...};
+
+inline bool &ss1x_asio_ptc_colog_status()
+{
+    static bool m_is_colog_on = false;
+    return m_is_colog_on;
+}
+
+inline int &ss1x_asio_ptc_deadline_wait_secends()
+{
+    static int m_wait_seconds = 5 * 60;
+    return m_wait_seconds;
+}
+
+} // namespace detail
+
+// NOTE 不定参数宏传递
+// #define func(args...) inner_call(##args) 
+// 是gnu写法，过时了。
+// 标准写法是... -> __VA_ARGS__
+#define COLOG_TRIGER_INFO(...) \
+    do {\
+        if (detail::ss1x_asio_ptc_colog_status()) { \
+            COLOG_INFO(__VA_ARGS__); \
+        } \
+    } while(false);
+
+#define COLOG_TRIGER_ERROR(...) \
+    do {\
+        if (detail::ss1x_asio_ptc_colog_status()) { \
+            COLOG_ERROR(__VA_ARGS__); \
+        } \
+    } while(false);
+
+#define COLOG_TRIGER_DEBUG(...) \
+    do {\
+        if (detail::ss1x_asio_ptc_colog_status()) { \
+            COLOG_DEBUG(__VA_ARGS__); \
+        } \
+    } while(false);
+
+struct method_t
+{
+    enum E {
+        E_NULL = 0,
+        E_GET,
+        E_POST,
+        E_HEAD,
+        E_PUT,
+        E_TRACE,
+        E_OPTIONS,
+        E_DELETE,
+        E_LOCK,
+        E_MKCOL,
+        E_COPY,
+        E_MOVE
+    };
+    method_t (E e = E_NULL)
+        : value(e)
+    {}
+    int value;
+    const char * name() const {
+        switch (this->value) {
+            case E_GET:     return "GET";     break;
+            case E_POST:    return "POST";    break;
+            case E_HEAD:    return "HEAD";    break;
+            case E_PUT:     return "PUT";     break;
+            case E_TRACE:   return "TRACE";   break;
+            case E_OPTIONS: return "OPTIONS"; break;
+            case E_DELETE:  return "DELETE";  break;
+            case E_LOCK:    return "LOCK";    break;
+            case E_MKCOL:   return "MKCOL";   break;
+            case E_COPY:    return "COPY";    break;
+            case E_MOVE:    return "MOVE";    break;
+            default: return "";
+        }
+    }
+    operator bool() const {
+        return value != E_NULL;
+    }
+    bool is(method_t::E v) const {
+        return this->value == v;
+    }
+};
 
 struct streambuf_t
 {
@@ -41,13 +149,9 @@ struct streambuf_t
     }
     void print(std::ostream& o) const
     {
-        int buf_size = m_streambuf.size();
-        boost::asio::streambuf::const_buffers_type::const_iterator begin(
-            m_streambuf.data().begin());
-        const char* ptr = boost::asio::buffer_cast<const char*>(*begin);
-        sss::string_view buf(ptr, buf_size);
+        sss::string_view buf = cast_string_view(m_streambuf);
         o << '[' << buf.size() << "; "
-          << sss::raw_string(sss::string_view(ptr, buf_size)) << ']';
+          << sss::raw_string(buf) << ']';
     }
     const value_type& m_streambuf;
 };
@@ -61,16 +165,6 @@ inline std::ostream& operator << (std::ostream& o, const streambuf_t& b)
 inline streambuf_t streambuf_view(const boost::asio::streambuf& stream)
 {
     return streambuf_t{stream};
-}
-
-inline sss::string_view cast_string_view(const boost::asio::streambuf& streambuf)
-{
-    int buf_size = streambuf.size();
-    boost::asio::streambuf::const_buffers_type::const_iterator begin(
-        streambuf.data().begin());
-    const char* ptr = boost::asio::buffer_cast<const char*>(*begin);
-    sss::string_view buf(ptr, buf_size);
-    return sss::string_view(ptr, buf_size);
 }
 
 struct pretty_ec_t
@@ -246,10 +340,13 @@ bool parse_http_status_line(Iterator begin, Iterator end,
 // boost::asio::placeholders::bytes_transferred
 class proxy_tunnel_client {
 public:
-    typedef std::function<void(sss::string_view responce)> onResponce_t;
+    typedef std::function<void()> onFinished_t;
+    typedef std::function<void(sss::string_view response)> onResponce_t;
     typedef std::function<bool(sss::string_view mark)> onEndCheck_t;
-    typedef std::function<std::string(const std::string& domain, const std::string& path)>
+    typedef std::function<std::vector<std::string>(const std::string& url)>
              CookieFunc_t;
+    typedef std::function<bool(const std::string& domain, const std::string& sever_cookie)>
+             SetCookieFunc_t;
 
 public:
     proxy_tunnel_client(boost::asio::io_service& io_service,
@@ -262,13 +359,14 @@ public:
           m_response_content_length(-1),
           m_max_redirect(5),
           m_is_gzip(false),
+          m_stoped(false),
           m_request(2048),
           m_response(2048),
           m_deadline(io_service)
     {
-        
-        COLOG_DEBUG(m_request.max_size());
-        COLOG_DEBUG(m_response.max_size());
+
+        COLOG_TRIGER_DEBUG(m_request.max_size());
+        COLOG_TRIGER_DEBUG(m_response.max_size());
         if (p_ctx) {
             m_socket.upgrade_to_ssl(*p_ctx);
         }
@@ -281,6 +379,12 @@ public:
 
     void                    setCookieFunc(CookieFunc_t&& func) {
         m_onRequestCookie = std::move(func);
+    }
+    void                    setSetCookieFunc(SetCookieFunc_t&& func) {
+        m_onResponseSetCookie = std::move(func);
+    }
+    void                    setOnFinished(onFinished_t&& func) {
+        m_onFinished = std::move(func);
     }
     void                    setOnContent(const onResponce_t& func)  { m_onContent  = func;       }
     void                    setOnEndCheck(const onEndCheck_t& func) { m_onEndCheck = func;       }
@@ -301,18 +405,46 @@ public:
 
     void http_get(const std::string& url)
     {
-        m_redirect_urls.resize(0);
-        m_redirect_urls.push_back(url);
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(url));
+        m_method = method_t(method_t::E_GET);
+        this->initUrl(url);
+        // m_redirect_urls.resize(0);
+        // m_redirect_urls.push_back(url);
         http_get_impl();
     }
 
     void ssl_tunnel_get(const std::string& proxy_domain, int proxy_port,
                         const std::string& url)
     {
-        m_redirect_urls.resize(0);
-        m_redirect_urls.push_back(url);
+        m_method = method_t(method_t::E_GET);
+        this->initUrl(url);
+        // m_redirect_urls.resize(0);
+        // m_redirect_urls.push_back(url);
         m_proxy_hostname = proxy_domain;
-        m_proxy_port = proxy_port;
+        m_proxy_port     = proxy_port;
+        ssl_tunnel_get_impl();
+    }
+
+    void http_post(const std::string& url, const std::string& content)
+    {
+        m_method = method_t(method_t::E_POST);
+        this->initUrl(url);
+        // m_redirect_urls.resize(0);
+        // m_redirect_urls.push_back(url);
+        m_post_content = content;
+        http_get_impl();
+    }
+
+    void ssl_tunnel_post(const std::string& proxy_domain, int proxy_port,
+                        const std::string& url, const std::string& content)
+    {
+        m_method = method_t(method_t::E_POST);
+        this->initUrl(url);
+        // m_redirect_urls.resize(0);
+        // m_redirect_urls.push_back(url);
+        m_proxy_hostname = proxy_domain;
+        m_proxy_port     = proxy_port;
+        m_post_content   = content;
         ssl_tunnel_get_impl();
     }
 
@@ -324,62 +456,70 @@ private:
 
     void http_get_impl()
     {
-        auto url_info = ss1x::util::url::split_port_auto(get_url());
-        if (is_need_ssl(url_info)) {
+        // auto url_info = ss1x::util::url::split_port_auto(get_url());
+        // auto& url_info = this->m_u;
+        if (is_need_ssl(m_url_info)) {
             m_socket.upgrade_to_ssl();
         }
         else {
             m_socket.disable_ssl();
         }
-        http_get_impl(std::get<1>(url_info), std::get<2>(url_info), std::get<3>(url_info));
+        http_get_impl(std::get<1>(m_url_info), std::get<2>(m_url_info), std::get<3>(m_url_info));
     }
 
     // const boost::system::error_code& err
-    void check_deadline()
+    // deadline_time 被调用的时候，error_code 就两种情况，
+    // 要么非0值，boost::asio::error::operation_aborted
+    //
+    // 要么0值，success
+    void check_deadline(const boost::system::error_code& err)
     {
-        // if (err && err !=boost::asio::error::eof) {
-        //     this->m_socket.get_socket().cancel(); 
+        COLOG_TRIGER_INFO(SSS_VALUE_MSG(pretty_ec(err)));
+        COLOG_TRIGER_INFO(SSS_VALUE_MSG(err == boost::asio::error::operation_aborted));
+        // if (!err) {
+        //     set_error_code(boost::asio::error::eof);
         //     return;
         // }
-        // Check whether the deadline has passed. We compare the deadline against 
-        // the current time since a new asynchronous operation may have moved the 
-        // deadline before this actor had a chance to run. 
+        if (err == boost::asio::error::operation_aborted) {
+            return;
+        }
 
-        if (m_deadline.expires_at() <= boost::asio::deadline_timer::traits_type::now()) 
-        { 
-            // The deadline has passed. The socket is closed so that any outstanding 
-            // asynchronous operations are cancelled. 
+        // Check whether the deadline has passed. We compare the deadline against
+        // the current time since a new asynchronous operation may have moved the
+        // deadline before this actor had a chance to run.
+        if (m_deadline.expires_at() <= boost::asio::deadline_timer::traits_type::now())
+        {
+            // The deadline has passed. The socket is closed so that any outstanding
+            // asynchronous operations are cancelled.
+            // this->m_socket.get_socket().close();
+            this->m_socket.get_socket().close();
+            this->m_stoped = true;
+            // this->m_deadline.cancel();
+            set_error_code(ss1x::errc::deadline_timer_error);
 
-            this->m_socket.get_socket().close(); 
+            // There is no longer an active deadline. The expiry is set to positive
+            // infinity so that the actor takes no action until a new deadline is set.
+            // m_deadline.expires_at(boost::posix_time::pos_infin);
+        }
 
-            // There is no longer an active deadline. The expiry is set to positive 
-            // infinity so that the actor takes no action until a new deadline is set. 
-            m_deadline.expires_at(boost::posix_time::pos_infin); 
-
-            throw "Time out : deadline on client!"; 
-        } 
-
-        // Put the actor back to sleep. 
-        m_deadline.async_wait(boost::bind(&proxy_tunnel_client::check_deadline, this)); 
+        // Put the actor back to sleep.
+        //m_deadline.async_wait(boost::bind(&proxy_tunnel_client::check_deadline,
+        //                                  this,
+        //                                  boost::asio::placeholders::error));
     }
 
     void http_get_impl(const std::string& server, int port, const std::string& path)
     {
-        COLOG_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
+        COLOG_TRIGER_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
 
-        // m_deadline.async_wait(boost::bind(&proxy_tunnel_client::check_deadline, this)); 
-
-        // //TODO magic number
-        // m_deadline.expires_from_now(boost::posix_time::seconds(5 * 60)); 
-
-        // std::cout << __PRETTY_FUNCTION__ << std::endl;
+        this->startTimer();
 
         char port_buf[10];
         std::sprintf(port_buf, "%d", port <= 0 ? 80 : port);
 
         boost::asio::ip::tcp::resolver::query query(server, port_buf);
-        COLOG_DEBUG(SSS_VALUE_MSG(server));
-        COLOG_DEBUG(SSS_VALUE_MSG(port));
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(server));
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(port));
         m_resolver.async_resolve(
             query, boost::bind(&proxy_tunnel_client::handle_resolve, this,
                                boost::asio::placeholders::error,
@@ -392,17 +532,19 @@ private:
     }
     void ssl_tunnel_get_impl()
     {
-        auto url_info = ss1x::util::url::split_port_auto(get_url());
-        if (is_need_ssl(url_info)) {
+        // auto url_info = ss1x::util::url::split_port_auto(get_url());
+        if (is_need_ssl(m_url_info)) {
             m_socket.upgrade_to_ssl();
         }
         else {
             m_socket.disable_ssl();
         }
-        COLOG_DEBUG(sss::raw_string(m_proxy_hostname), m_proxy_port);
+        COLOG_TRIGER_DEBUG(sss::raw_string(m_proxy_hostname), m_proxy_port);
 
         char port_buf[10];
         std::sprintf(port_buf, "%d", m_proxy_port <= 0 ? 80 : m_proxy_port);
+
+        this->startTimer();
 
         boost::asio::ip::tcp::resolver::query query(m_proxy_hostname, port_buf);
         // NOTE 这async_resolve()之后，是异步完成；如果现在是normal-socket，
@@ -419,6 +561,7 @@ private:
     template<typename Stream, typename Query>
     void async_https_proxy_connect(Stream& sock, Query& query)
     {
+        RET_ON_STOP;
         m_resolver.async_resolve(
             query, boost::bind(&proxy_tunnel_client::async_https_proxy_resolve<Stream>, this,
                                boost::asio::placeholders::error,
@@ -430,10 +573,11 @@ private:
                                    boost::asio::ip::tcp::resolver::iterator endpoint_iterator,
                                    Stream& sock)
     {
-        COLOG_DEBUG("");
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG("");
         if (err)
         {
-            COLOG_ERROR("Connect to http proxy \'", m_proxy_hostname, ":",
+            COLOG_TRIGER_ERROR("Connect to http proxy \'", m_proxy_hostname, ":",
                         m_proxy_port, "\', error message \'", err.message(),
                         "\'");
             set_error_code(err);
@@ -454,14 +598,15 @@ private:
         boost::asio::ip::tcp::resolver::iterator endpoint_iterator,
         const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err));
         if (err)
         {
             endpoint_iterator++;
             boost::asio::ip::tcp::resolver::iterator end;
             if (endpoint_iterator == end)
             {
-                COLOG_ERROR("Connect to http proxy \'" , m_proxy_hostname , ":" , m_proxy_port , 
+                COLOG_TRIGER_ERROR("Connect to http proxy \'" , m_proxy_hostname , ":" , m_proxy_port ,
                     "\', error message \'" , err.message() , "\'");
                 set_error_code(err);
                 return;
@@ -478,23 +623,25 @@ private:
         }
         discard(m_response);
         std::ostream request_stream(&m_request);
-        auto url_info = ss1x::util::url::split_port_auto(get_url());
-        if (std::get<0>(url_info) == "https") {
-            request_stream << "CONNECT " << std::get<1>(url_info);
-            if (std::get<2>(url_info) != 80) {
-                request_stream << ":" << std::get<2>(url_info);
+        // auto url_info = ss1x::util::url::split_port_auto(get_url());
+        if (std::get<0>(m_url_info) == "https") {
+            request_stream << "CONNECT " << std::get<1>(m_url_info);
+            if (std::get<2>(m_url_info) != 80) {
+                request_stream << ":" << std::get<2>(m_url_info);
             }
             request_stream << " HTTP/1.1\r\n";
-            request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
+            request_stream << "Host: " << std::get<1>(m_url_info) << "\r\n";
             request_stream << "Accept: text/html, application/xhtml+xml, */*\r\n";
             request_stream << "User-Agent: " << USER_AGENT_DEFAULT << "\r\n";
 #if 1
             // NOTE 貌似 是否close，对于结果没啥影响
-            request_stream << "Connection: close\r\n\r\n";
+            // request_stream << "Connection: close\r\n\r\n";
+            // NOTE 服务端可以主动发出 close动作，来提示，中断链接
+            request_stream << "Connection: ""keep-alive""\r\n\r\n";
 #endif
             request_stream << "\r\n";
 
-            COLOG_DEBUG(streambuf_view(m_request));
+            COLOG_TRIGER_DEBUG(streambuf_view(m_request));
 
             boost::asio::async_write(
                 sock, m_request, boost::asio::transfer_exactly(m_request.size()),
@@ -511,10 +658,11 @@ private:
     template<typename Stream>
     void handle_https_proxy_request(Stream& sock, const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err));
         if (err)
         {
-            COLOG_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
+            COLOG_TRIGER_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
                         ":", m_proxy_port, "error message ", err.message());
             set_error_code(err);
             return;
@@ -528,10 +676,11 @@ private:
     template<typename Stream>
     void handle_https_proxy_status(Stream& sock, const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err));
         if (err)
         {
-            COLOG_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
+            COLOG_TRIGER_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
                         ":", m_proxy_port, "error message ", err.message());
             set_error_code(err);
             return;
@@ -549,11 +698,11 @@ private:
                 std::istreambuf_iterator<char>(), version_major, version_minor,
                 status_code)) {
             ec = ss1x::errc::malformed_status_line;
-            COLOG_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
+            COLOG_TRIGER_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
                         ":", m_proxy_port, "error message ", err.message());
             return;
         }
-        COLOG_DEBUG("proxy_status:http version: ", version_major, '.', version_minor);
+        COLOG_TRIGER_DEBUG("proxy_status:http version: ", version_major, '.', version_minor);
 
         // TODO 按行拆分 proxy header 的处理
         boost::asio::async_read_until(
@@ -567,10 +716,11 @@ private:
     template<typename Stream>
     void handle_https_proxy_header(Stream & sock, int bytes_transferred, const boost::system::error_code& err)
     {
-        COLOG_DEBUG(SSS_VALUE_MSG(bytes_transferred), pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(bytes_transferred), pretty_ec(err));
         if (err)
         {
-            COLOG_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
+            COLOG_TRIGER_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
                         ":", m_proxy_port, "error message ", err.message());
             set_error_code(err);
             return;
@@ -584,14 +734,14 @@ private:
 
         // Write whatever content we already have to output.
         if (m_response.size() > 0 && this->header().status_code == 200) {
-            COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
+            COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
             consume_content(m_response);
         }
         else {
             discard(m_response);
         }
 
-        COLOG_DEBUG("Connect to http proxy \'", m_proxy_hostname, ":", m_proxy_port, "\'.");
+        COLOG_TRIGER_DEBUG("Connect to http proxy \'", m_proxy_hostname, ":", m_proxy_port, "\'.");
 
         // ssl的handshake过程，是底层封装好了的。这里必须交给ssl_stream的socket对象
         // 的async_handshake（或者同步版handshake()函数）来完成。
@@ -612,6 +762,7 @@ private:
                              const std::string& field,
                              const std::string& default_value = "")
     {
+        RET_ON_STOP;
         if (used_field.find(field) != used_field.end()) {
             return;
         }
@@ -632,6 +783,7 @@ private:
                                ss1x::http::Headers& request_header,
                                std::ostream& request_stream)
     {
+        RET_ON_STOP;
         for (const auto & kv : request_header) {
             if (used_field.find(kv.first) != used_field.end()) {
                 continue;
@@ -642,18 +794,19 @@ private:
 
     void handle_https_proxy_handshake(const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err));
         if (err)
         {
-            COLOG_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
+            COLOG_TRIGER_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
                         ":", m_proxy_port, "error message ", err.message());
             set_error_code(err);
             return;
         }
 
-        COLOG_DEBUG("Handshake to ", sss::raw_string(get_url()));
+        COLOG_TRIGER_DEBUG("Handshake to ", sss::raw_string(get_url()));
 
-        COLOG_DEBUG("m_response.consume(", m_response.size(), ")");
+        COLOG_TRIGER_DEBUG("m_response.consume(", m_response.size(), ")");
         // 清空接收缓冲区.
         discard(m_response);
 
@@ -663,7 +816,8 @@ private:
 
     void async_request()
     {
-        COLOG_DEBUG("");
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG("");
         // GET / HTTP/1.1
         // Host: www.google.co.jp
         // Accept: text/html, application/xhtml+xml, */*
@@ -674,19 +828,19 @@ private:
         discard(m_request);
         // NOTE 逻辑上，POST，GET，这两种方法，应该公用一个request-generator
         std::ostream request_stream(&m_request);
-        auto url_info = ss1x::util::url::split_port_auto(get_url());
+        // auto url_info = ss1x::util::url::split_port_auto(get_url());
 
         if (m_proxy_hostname.empty()) {
-            request_stream << "GET " << std::get<3>(url_info) << " HTTP/";
+            request_stream << m_method.name() << " " << std::get<3>(m_url_info) << " HTTP/";
         }
         else {
-            request_stream << "GET " << this->get_url() << " HTTP/";
+            request_stream << m_method.name() << " " << this->get_url() << " HTTP/";
         }
 
         if (!m_request_headers.http_version.empty()) {
             int version_major = -1;
             int version_minor = -1;
-            int offset = -1;
+            int offset        = -1;
             if (std::sscanf(m_request_headers.http_version.c_str(), "%d.%d%n",
                             &version_major, &version_minor, &offset) != 2 ||
                 version_major <= 0 || version_minor < 0 ||
@@ -697,31 +851,34 @@ private:
                     "error parssing user supliment http-version with ",
                     sss::raw_string(m_request_headers.http_version));
             }
-            COLOG_DEBUG("http_version", m_request_headers.http_version);
+            COLOG_TRIGER_DEBUG("http_version", m_request_headers.http_version);
             request_stream << m_request_headers.http_version;
         }
         else {
             // NOTE HTTP/1.1 可能需要支持
             // Transfer-Encoding "chunked"
             // 特性，这需要特殊处理！先读取16进制的长度数字，然后读取该长度的数据。
-            // 不过，如果中间发生了截断，怎么办？即，被m_responce本身的buffer阶段了……
+            // 不过，如果中间发生了截断，怎么办？即，被m_response本身的buffer阶段了……
             // 还有，如果chunk数，太大了怎么办？另外，读取chunk数，本身的时候，
             // 被截断了，怎么办？
             // 只能是状态机了！
-            COLOG_DEBUG("http_version", "1.0");
+            COLOG_TRIGER_DEBUG("http_version", "1.0");
             request_stream << "1.0";
         }
         request_stream << "\r\n";
 
         std::set<std::string> used_field;
 
+        // NOTE Host 需要手动拼凑
         if (m_proxy_hostname.empty()) {
-            request_stream << "Host: " << std::get<1>(url_info) << "\r\n";
+            request_stream << "Host: " << std::get<1>(m_url_info) << "\r\n";
         }
         else {
             request_stream << "Host: " << m_proxy_hostname << "\r\n";
         }
         used_field.insert("Host");
+
+        requestStreamHelper(used_field, m_request_headers, request_stream, "User-Agent", USER_AGENT_DEFAULT);
         // 另外，可能还需要根据html标签类型的不同，来限制可以获取的类型；
         // 比如img的话，就获取
         // Accept: image/webp,image/*,*/*;q=0.8
@@ -732,9 +889,36 @@ private:
         // requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "gzip, deflate, sdch");
         // 参考： https://imququ.com/post/vary-header-in-http.html
         requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "gzip, deflate, sdch");
-        processRequestCookie(request_stream, std::get<1>(url_info), std::get<3>(url_info));
-        used_field.insert("Cookie");
-        requestStreamHelper(used_field, m_request_headers, request_stream, "User-Agent", USER_AGENT_DEFAULT);
+
+        if (m_request_headers.has("Referer")) {
+            requestStreamHelper(used_field, m_request_headers, request_stream, "Referer", "");
+        }
+
+        if (m_method.is(method_t::E_POST)) {
+            std::string CL_str = sss::cast_string(m_post_content.size());
+            requestStreamHelper(used_field, m_request_headers, request_stream, "Content-Type", "application/x-www-form-urlencoded");
+            requestStreamHelper(used_field, m_request_headers, request_stream, "Content-Length", CL_str);
+        }
+
+        if (m_request_headers.has("Cookie")) {
+            requestStreamHelper(used_field, m_request_headers, request_stream, "Cookie", "");
+        }
+        else if (m_onRequestCookie) {
+            auto cookies = m_onRequestCookie(this->get_url());
+            int cookie_cnt = 0;
+            for (auto& cookie : cookies) {
+                COLOG_TRIGER_INFO(std::get<1>(m_url_info), std::get<3>(m_url_info), cookie);
+                if (cookie.empty()) {
+                    continue;
+                }
+                request_stream << "Cookie" << ": " << cookie << "\r\n";
+                ++cookie_cnt;
+            }
+            if (cookie_cnt) {
+                used_field.insert("Cookie");
+            }
+        }
+
         // NOTE Connection 选项 等于 close和keep-alive的区别在于，keep-alive的时候，服务器端，不会主动关闭通信，也就是没有eof传来。
         // 这需要客户端，自动分析包大小，进行消息拆分。
         // 比如，分析：Content-Length: 4376 字段
@@ -742,7 +926,12 @@ private:
         requestStreamDumpRest(used_field, m_request_headers, request_stream);
         request_stream << "\r\n";
 
-        COLOG_DEBUG(streambuf_view(m_request));
+        // 2017-12-25
+        if (m_method.is(method_t::E_POST)) {
+            request_stream << m_post_content << "\r\n";
+        }
+
+        COLOG_TRIGER_DEBUG(streambuf_view(m_request));
         boost::asio::async_write(
             m_socket, m_request,
             boost::asio::transfer_exactly(m_request.size()),
@@ -752,10 +941,11 @@ private:
 
     void handle_request(const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err));
         if (err)
         {
-            COLOG_ERROR("Send request, error message: ", err.message());
+            COLOG_TRIGER_ERROR("Send request, error message: ", err.message());
             set_error_code(err);
             return;
         }
@@ -771,10 +961,11 @@ private:
 
     void handle_read_status(int bytes_transferred, const boost::system::error_code& err)
     {
-        COLOG_DEBUG(bytes_transferred, pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(bytes_transferred, pretty_ec(err));
         if (err)
         {
-            COLOG_ERROR("Read status line, error message: ", err.message());
+            COLOG_TRIGER_ERROR("Read status line, error message: ", err.message());
             set_error_code(err);
             return;
         }
@@ -789,7 +980,7 @@ private:
         // int response_size = m_response.size();
         boost::asio::buffer_copy(tempbuf.prepare(bytes_transferred), m_response.data());
         tempbuf.commit(bytes_transferred);
-        COLOG_DEBUG(streambuf_view(tempbuf));
+        COLOG_TRIGER_DEBUG(streambuf_view(tempbuf));
 
         // 检查http状态码, version_major和version_minor是http协议的版本号.
         int version_major = 0;
@@ -800,13 +991,13 @@ private:
                 std::istreambuf_iterator<char>(),
                 version_major, version_minor, status_code))
         {
-            COLOG_ERROR("Malformed status line");
+            COLOG_TRIGER_ERROR("Malformed status line");
             set_error_code(ss1x::errc::malformed_status_line);
             return;
         }
         this->header().status_code = status_code;
 
-        COLOG_DEBUG(version_major, '.', version_minor, status_code);
+        COLOG_TRIGER_DEBUG(version_major, '.', version_minor, status_code);
         discard(m_response, bytes_transferred);
 
         // NOTE
@@ -833,8 +1024,23 @@ private:
                         boost::asio::placeholders::error));
     }
 
+    void processResponseSetCookie(ss1x::http::Headers& headers)
+    {
+        if (headers.has("Set-Cookie") && m_onResponseSetCookie) {
+            m_onResponseSetCookie(std::get<1>(m_url_info), headers.get("Set-Cookie"));
+        }
+    }
+
+    void processResponseSetCookie2(const std::string& domain, std::string& cookie)
+    {
+        if (m_onResponseSetCookie) {
+            m_onResponseSetCookie(domain, cookie);
+        }
+    }
+
     void processHeader(ss1x::http::Headers& headers, sss::string_view head_line_view)
     {
+        RET_ON_STOP;
         if (!head_line_view.empty() && !head_line_view.is_end_with("\r\n")) {
             SSS_POSITION_THROW(std::runtime_error, "not end with \"\\r\\n\"");
         }
@@ -869,6 +1075,9 @@ private:
             auto value = line.substr(value_beg, len).to_string();
             // NOTE 多值的key，通过"\r\n"为间隔，串接在一起。
             // TODO 或许，应该用vector来保存header；
+            if (key == "Set-Cookie") {
+                this->processResponseSetCookie2(std::get<1>(m_url_info), value);
+            }
             if (!headers[key].empty()) {
                 headers[key].append("\r\n");
             }
@@ -878,7 +1087,7 @@ private:
                 m_response_content_length = sss::string_cast<uint32_t>(value);
             }
 
-            COLOG_DEBUG(sss::raw_string(line));
+            COLOG_TRIGER_DEBUG(sss::raw_string(line));
         }
     }
 
@@ -906,14 +1115,15 @@ private:
     //         headers[key] = value;
 
     //         // NOTE TODO 或许，应该用vector来保存header；
-    //         COLOG_DEBUG(sss::raw_string(header));
+    //         COLOG_TRIGER_DEBUG(sss::raw_string(header));
     //     }
     // }
 
     void handle_read_header(int bytes_transferred, const boost::system::error_code& err)
     {
-        COLOG_DEBUG(bytes_transferred, pretty_ec(err));
-        COLOG_DEBUG(streambuf_view(m_response));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(bytes_transferred, pretty_ec(err));
+        COLOG_TRIGER_DEBUG(streambuf_view(m_response));
 
         if (err) {
             set_error_code(err);
@@ -936,7 +1146,7 @@ private:
         // template <typename Handler>
         // void http_stream::handle_header(Handler handler,
         //  std::string header_string, int bytes_transferred, const boost::system::error_code& err)
-        // 
+        //
         // 注意，函数接口中，header_string是值传递！
         //
         // 初始调用形如：
@@ -974,14 +1184,16 @@ private:
             // NOTE 如果header的单行，都会"爆栈"，那么说明有"攻击"行为。
         }
         else if (bytes_transferred < 2) {
-            COLOG_ERROR("left byts count :", bytes_transferred);
+            COLOG_TRIGER_ERROR("left byts count :", bytes_transferred);
             return;
         }
 
-        // NOTE 此时 bytes_transferred == 2并且，responce的buf中，必须为"\r\n"。
+        // NOTE 此时 bytes_transferred == 2并且，response的buf中，必须为"\r\n"。
         m_response.consume(2);
 
-        COLOG_DEBUG(m_response_headers);
+        COLOG_TRIGER_DEBUG(m_response_headers);
+
+        // processResponseSetCookie(m_response_headers);
 
         bool redirect = false;
 
@@ -996,18 +1208,19 @@ private:
                         if (!it->second.empty() && it->second != this->get_url()) {
                             redirect = true;
                             auto newLocation = ss1x::util::url::full_of_copy(it->second, this->get_url());
-                            COLOG_INFO(SSS_VALUE_MSG(newLocation));
-                            this->m_redirect_urls.push_back(newLocation);
+                            COLOG_TRIGER_INFO(SSS_VALUE_MSG(newLocation));
+                            // this->m_redirect_urls.push_back(newLocation);
+                            this->addRedirectUrl(newLocation);
                         }
                         else {
-                            COLOG_ERROR(m_response_headers);
-                            COLOG_ERROR(it->second, " invalid");
+                            COLOG_TRIGER_ERROR(m_response_headers);
+                            COLOG_TRIGER_ERROR(it->second, " invalid");
                             set_error_code(ss1x::errc::invalid_redirect);
                             return;
                         }
                     }
                     else {
-                        COLOG_ERROR("new Location can not be found.");
+                        COLOG_TRIGER_ERROR("new Location can not be found.");
                         set_error_code(ss1x::errc::redirect_not_found);
                         return;
                     }
@@ -1017,7 +1230,7 @@ private:
             case 200:
                 if (m_response_headers.has_kv("Transfer-Encoding", "chunked")) { // 将chunked处理，移动到跳转的后面
                     this->m_chunked_transfer = true;
-                    COLOG_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
+                    COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
                 }
                 break;
 
@@ -1073,7 +1286,7 @@ private:
                 m_response_content_length -= m_response.size();
             }
             if (m_response.size() > 0 && this->header().status_code == 200) {
-                COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
+                COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
                 consume_content(m_response);
             }
             else {
@@ -1095,7 +1308,8 @@ private:
 
     void handle_read_chunk_head(int bytes_transferred, const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
         if (bytes_transferred <= 0) {
             // NOTE hand-made eof mark
             set_error_code(boost::asio::error::eof);
@@ -1103,12 +1317,9 @@ private:
         }
 
         int chunk_size = -1;
-        boost::asio::streambuf::const_buffers_type::const_iterator begin(
-            m_response.data().begin());
-        const char* ptr = boost::asio::buffer_cast<const char*>(*begin);
-        sss::string_view sv(ptr, bytes_transferred);
+        sss::string_view sv = cast_string_view(m_response).substr(0, bytes_transferred);
         int offset = -1;
-        int ec = std::sscanf(ptr, "%x%n", &chunk_size, &offset);
+        int ec = std::sscanf(sv.data(), "%x%n", &chunk_size, &offset);
         if (ec != 1) {
             SSS_POSITION_THROW(std::runtime_error,
                                "parse x-digit-number error: ",
@@ -1116,13 +1327,13 @@ private:
         }
         // NOTE 标准允许chunk_size的16进制字符后面，跟若干padding用的空格字符！
         bool is_all_space =
-            sss::is_all(ptr + offset, ptr + bytes_transferred - 2,
+            sss::is_all(sv.data() + offset, sv.data() + bytes_transferred - 2,
                         [](char ch) -> bool { return ch == ' '; });
         if (!is_all_space) {
             SSS_POSITION_THROW(std::runtime_error,
                                "unexpect none-blankspace trailing byte: ",
                                sss::raw_string(sss::string_view(
-                                   ptr + offset,
+                                   sv.data() + offset,
                                    bytes_transferred - 2 - offset)));
         }
 
@@ -1134,10 +1345,10 @@ private:
         }
 
         m_chunk_size = chunk_size + 2;
-        COLOG_DEBUG(SSS_VALUE_MSG(chunk_size), " <- ", sss::raw_string(sv));
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(chunk_size), " <- ", sss::raw_string(sv));
         discard(m_response, bytes_transferred);
         if (!chunk_size) {
-            COLOG_DEBUG(SSS_VALUE_MSG(chunk_size));
+            COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(chunk_size));
             set_error_code(boost::asio::error::eof);
             return;
         }
@@ -1164,7 +1375,8 @@ private:
     void http_post(const std::string& server, int port, const std::string& path,
                    const std::string& postParams)
     {
-        COLOG_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
         std::ostream request_stream(&m_request);
         // NOTE 可以从 m_response_headers 中，构造http-head。
         request_stream << "POST " << path << " HTTP/1.0\r\n";
@@ -1190,7 +1402,8 @@ private:
         const boost::system::error_code& err,
         boost::asio::ip::tcp::resolver::iterator endpoint_iterator)
     {
-        COLOG_DEBUG(pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err));
         if (err) {
             set_error_code(err);
             return;
@@ -1220,7 +1433,7 @@ private:
 
 			if (ec)
 			{
-                COLOG_ERROR("Set verify callback \'" , host, "\', error message \'" , ec.message() , "\'");
+                COLOG_TRIGER_ERROR("Set verify callback \'" , host, "\', error message \'" , ec.message() , "\'");
 				return;
 			}
 #endif
@@ -1232,10 +1445,11 @@ private:
                         boost::asio::placeholders::error));
     }
 
-    bool verify_certificate(bool preverified,
+    void verify_certificate(bool preverified,
                             boost::asio::ssl::verify_context& ctx)
     {
-        COLOG_DEBUG(SSS_VALUE_MSG(preverified));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(preverified));
         // The verify callback can be used to check whether the certificate that
         // is being presented is valid for the peer. For example, RFC 2818
         // describes the steps involved in doing this for HTTPS. Consult the
@@ -1249,14 +1463,15 @@ private:
         X509_NAME_oneline(X509_get_subject_name(cert), subject_name,
                           sizeof(subject_name));
 
-        COLOG_DEBUG("Verifying ", subject_name);
+        COLOG_TRIGER_DEBUG("Verifying ", subject_name);
 
-        return preverified;
+        // return preverified;
     }
 
     void handle_connect(const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err));
         if (err) {
             set_error_code(err);
             return;
@@ -1274,21 +1489,23 @@ private:
 
     void handle_handshake(const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err));
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err));
         if (err) {
             set_error_code(err);
             return;
         }
         // const char* header =
         //     boost::asio::buffer_cast<const char*>(m_request.data());
-        // COLOG_DEBUG(SSS_VALUE_MSG(header));
+        // COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(header));
 
         async_request();
     }
 
     void handle_read_content(int bytes_transferred, const boost::system::error_code& err)
     {
-        COLOG_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
+        RET_ON_STOP;
+        COLOG_TRIGER_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
         if (bytes_transferred <= 0) {
             // NOTE hand-made eof mark
             set_error_code(boost::asio::error::eof);
@@ -1306,10 +1523,10 @@ private:
         else {
             discard(m_response, bytes_transferred);
         }
-        COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
         if (is_end) {
-            COLOG_DEBUG("is_end_chunk");
+            COLOG_TRIGER_DEBUG("is_end_chunk");
             set_error_code(boost::asio::error::eof);
             return;
         }
@@ -1357,7 +1574,7 @@ private:
         // Continue reading remaining data until EOF.
         //
         // NOTE
-        // 
+        //
         // async_read(sock, buffer(size), handler)是读满size字节再调用handdler；
         // asycn_read_some() 是读读一点就调用；
         // 那么async_read + boost::asio::transfer_at_least(1) 呢？
@@ -1435,43 +1652,66 @@ private:
     // }
 
 protected:
-    void processRequestCookie(std::ostream& request_stream, const std::string& server, const std::string& path)
+    void startTimer()
     {
-        if (m_onRequestCookie) {
-            std::string cookie = m_onRequestCookie(server, path);
-            if (!cookie.empty()) {
-                COLOG_INFO(server, path, cookie);
-                request_stream << "Cookie: " << cookie << "\r\n";
-            }
-        }
+        // NOTE 这里，用一个全局函数来修改默认值。
+        COLOG_TRIGER_INFO(SSS_VALUE_MSG(detail::ss1x_asio_ptc_deadline_wait_secends()));
+        // m_deadline.expires_from_now(boost::posix_time::seconds(detail::ss1x_asio_ptc_deadline_wait_secends()));
+        m_deadline.expires_from_now(boost::posix_time::seconds(5));
+
+        m_deadline.async_wait(boost::bind(&proxy_tunnel_client::check_deadline,
+                                          this,
+                                          boost::asio::placeholders::error));
     }
 
-    void set_error_code(const boost::system::error_code& ec) { m_ec = ec; }
-    void discard(boost::asio::streambuf& responce, int bytes_transferred = 0)
+    void resetTimer()
     {
-        if (bytes_transferred > 0) {
-            responce.consume(std::min(responce.size(), std::size_t(bytes_transferred)));
-        }
-        else {
-            responce.consume(responce.size());
+        m_deadline.cancel();
+        this->startTimer();
+    }
+
+    void initUrl(const std::string& url)
+    {
+        m_redirect_urls.resize(0);
+        this->addRedirectUrl(url);
+    }
+
+    void addRedirectUrl(const std::string& url)
+    {
+        m_redirect_urls.push_back(url);
+        m_url_info = ss1x::util::url::split_port_auto(url);
+    }
+
+    void set_error_code(const boost::system::error_code& ec) {
+        this->m_ec = ec;
+        this->m_deadline.cancel();
+        this->m_stoped = true;
+        if (m_onFinished) {
+            m_onFinished();
         }
     }
-    void consume_content(boost::asio::streambuf& responce, int bytes_transferred = 0)
+    void discard(boost::asio::streambuf& response, int bytes_transferred = 0)
+    {
+        if (bytes_transferred > 0) {
+            response.consume(std::min(response.size(), std::size_t(bytes_transferred)));
+        }
+        else {
+            response.consume(response.size());
+        }
+    }
+    void consume_content(boost::asio::streambuf& response, int bytes_transferred = 0)
     {
         // NOTE m_chunk_size 包括了结尾的"\r\n"!
         // 如果 bytes_transferred 正好等于 m_chunk_size，说明，这次刚好读到chunk结束
         // 如果小于m_chunk_size，则都说明，还有数据。
         // 并且，最后两个字节，需要忽略！
-        COLOG_DEBUG(bytes_transferred, "out of", responce.size());
+        COLOG_TRIGER_DEBUG(bytes_transferred, "out of", response.size());
         if (m_onContent) {
-            std::size_t size = responce.size();
+            std::size_t size = response.size();
             if (bytes_transferred > 0 && size > std::size_t(bytes_transferred)) {
                 size = bytes_transferred;
             }
-            boost::asio::streambuf::const_buffers_type::const_iterator begin(
-                responce.data().begin());
-            const char* ptr = boost::asio::buffer_cast<const char*>(*begin);
-            sss::string_view sv(ptr, size);
+            sss::string_view sv = cast_string_view(response).substr(0, size);
             if (m_chunked_transfer) {
                 switch (m_chunk_size - bytes_transferred) {
                     case 0:
@@ -1514,7 +1754,7 @@ protected:
                         }
                         // bytes_transferred <= m_chunk_size - 2
                         m_chunk_size -= bytes_transferred;
-                        COLOG_DEBUG("left ", m_chunk_size);
+                        COLOG_TRIGER_DEBUG("left ", m_chunk_size);
                 }
             }
             else {
@@ -1529,17 +1769,17 @@ protected:
                 int ec = 0;
                 int covert_cnt = m_gzstream->inflate(sv, &ec);
                 if (ec < 0 && ec != Z_BUF_ERROR && covert_cnt <= 0) {
-                    COLOG_ERROR(SSS_VALUE_MSG(ec));
+                    COLOG_TRIGER_ERROR(SSS_VALUE_MSG(ec));
                     SSS_POSITION_THROW(std::runtime_error, "inflate error!");
                 }
             }
             else {
                 m_onContent(sv);
             }
-            responce.consume(size);
+            response.consume(size);
         }
         else {
-            discard(responce, bytes_transferred);
+            discard(response, bytes_transferred);
         }
     }
 
@@ -1548,11 +1788,7 @@ protected:
         if (!m_onEndCheck) {
             return false;
         }
-        int buf_size = buf.size();
-        boost::asio::streambuf::const_buffers_type::const_iterator begin(
-            buf.data().begin());
-        const char* ptr = boost::asio::buffer_cast<const char*>(*begin);
-        sss::string_view sv(ptr, buf_size);
+        sss::string_view sv = cast_string_view(buf);
         // return sv.find("</html>") != sss::string_view::npos;
         return m_onEndCheck(sv);
     }
@@ -1572,6 +1808,7 @@ private:
     size_t                         m_max_redirect;
 
     bool                            m_is_gzip;
+    bool                            m_stoped;
     std::unique_ptr<ss1x::gzstream> m_gzstream;
 
     boost::asio::streambuf         m_request;
@@ -1579,15 +1816,21 @@ private:
 
     boost::asio::deadline_timer    m_deadline;
 
-    // TODO 也许，应该将header分开,request,responce
-    // 不过，对于header()函数来说，用户一般只关心responce的header。
+    // TODO 也许，应该将header分开,request,response
+    // 不过，对于header()函数来说，用户一般只关心response的header。
     ss1x::http::Headers            m_response_headers;
     ss1x::http::Headers            m_request_headers;
     boost::system::error_code      m_ec;
     std::string                    m_proxy_hostname;
     int                            m_proxy_port;
     std::vector<std::string>       m_redirect_urls;
+    decltype(ss1x::util::url::split_port_auto("")) m_url_info;
+
+    method_t                       m_method;
+    std::string                    m_post_content;
+    onFinished_t                   m_onFinished;
     onResponce_t                   m_onContent;
     onEndCheck_t                   m_onEndCheck;
-    CookieFunc_t                   m_onRequestCookie;
+    CookieFunc_t                   m_onRequestCookie; // Cookie: ...
+    SetCookieFunc_t                m_onResponseSetCookie; // Set-Cookie: ...
 };
