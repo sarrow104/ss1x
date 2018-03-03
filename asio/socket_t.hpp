@@ -109,6 +109,16 @@ public:
         return *m_ssl_stream;
     }
 
+    void close()
+    {
+        this->get_socket().close();
+    }
+
+    void cancel()
+    {
+        this->get_socket().cancel();
+    }
+
     bool using_ssl() const
     {
         return bool(m_ssl_stream) && m_endable_ssl;
