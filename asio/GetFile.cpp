@@ -24,6 +24,16 @@
 namespace ss1x {
 namespace asio {
 
+bool & ptc_colog_status()
+{
+    return ::detail::ss1x_asio_ptc_colog_status();
+}
+
+int & ptc_deadline_timer_wait()
+{
+    return ::detail::ss1x_asio_ptc_deadline_wait_secends();
+}
+
 namespace detail {
 
 /**
@@ -203,6 +213,7 @@ void getFileInner(std::ostream& outFile, ss1x::http::Headers* headers,
     using namespace boost::asio;
     using boost::asio::ip::tcp;
     boost::asio::io_service io_service;
+    boost::asio::io_service::work work(io_service);
 
     // Get a list of endpoints corresponding to the server name.
     tcp::resolver resolver(io_service);
@@ -407,6 +418,41 @@ void proxyGetFile(std::ostream& outFile, ss1x::http::Headers& header,
     ss1x::asio::getFile(outFile, header, proxy_domain, url, proxy_port);
 }
 
+boost::system::error_code redirectHttpPost(
+    std::ostream& out, ss1x::http::Headers& header, const std::string& url,
+    const std::string& post_content,
+    const ss1x::http::Headers& request_header)
+{
+    boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
+    ctx.set_default_verify_paths();
+    auto url_info = ss1x::util::url::split_port_auto(url);
+
+    boost::asio::io_service io_service;
+    boost::asio::io_service::work work(io_service);
+
+    proxy_tunnel_client c(io_service, nullptr);
+    // c.max_redirect(0);
+    c.upgrade_to_ssl(ctx);
+    c.request_header() = request_header;
+    c.setOnFinished(
+        [&io_service]()->void{
+            io_service.stop();
+        });
+    c.setOnContent(
+        [&out](sss::string_view response) -> void { out << response; });
+    // c.setCookieFunc(std::move(cookieFun));
+    c.http_post(url, post_content);
+    // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
+    // 于是，额外提供了一种检查机制，以便快速返回。
+    // c.setOnEndCheck([](sss::string_view sv)-> bool { return
+    // sv.find("</html>") != sss::string_view::npos; });
+    io_service.run();
+    COLOG_DEBUG(SSS_VALUE_MSG(c.header().status_code));
+    header = c.header();
+
+    return c.error_code();
+}
+
 boost::system::error_code redirectHttpGet(std::ostream& out,
                                           ss1x::http::Headers& header,
                                           const std::string& url,
@@ -427,11 +473,16 @@ boost::system::error_code redirectHttpGetCookie(std::ostream& out,
     auto url_info = ss1x::util::url::split_port_auto(url);
 
     boost::asio::io_service io_service;
+    boost::asio::io_service::work work(io_service);
 
     proxy_tunnel_client c(io_service, nullptr);
     // c.max_redirect(0);
     c.upgrade_to_ssl(ctx);
     c.request_header() = request_header;
+    c.setOnFinished(
+        [&io_service]()->void{
+            io_service.stop();
+        });
     c.setOnContent(
         [&out](sss::string_view response) -> void { out << response; });
     c.setCookieFunc(std::move(cookieFun));
@@ -468,13 +519,19 @@ boost::system::error_code proxyRedirectHttpGetCookie(
     auto url_info = ss1x::util::url::split_port_auto(url);
 
     boost::asio::io_service io_service;
+    boost::asio::io_service::work work(io_service);
 
     proxy_tunnel_client c(io_service, nullptr);
     c.upgrade_to_ssl(ctx);
     c.request_header() = request_header;
+    c.setOnFinished(
+        [&io_service]()->void{
+            io_service.stop();
+        });
     c.setOnContent(
         [&out](sss::string_view response) -> void { out << response; });
     c.setCookieFunc(std::move(cookieFun));
+    c.setSetCookieFunc(ss1x::cookie::set);
     // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
     // 于是，额外提供了一种检查机制，以便快速返回。
 #if 1
