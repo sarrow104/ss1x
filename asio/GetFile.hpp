@@ -3,8 +3,10 @@
 
 #include <iosfwd>
 #include <functional>
+#include <vector>
 
 #include "headers.hpp"
+#include "cookie.hpp"
 
 namespace boost {
 namespace system {
@@ -15,6 +17,9 @@ class error_code;
 namespace ss1x {
 
 namespace asio {
+
+bool & ptc_colog_status();
+int & ptc_deadline_timer_wait();
 
 void getFile(std::ostream& outFile, const std::string& serverName,
              const std::string& getCommand, int port = 80);
@@ -44,15 +49,23 @@ void proxyGetFile(std::ostream& outFile, ss1x::http::Headers& header,
                   const std::string& proxy_domain, int proxy_port,
                   const std::string& url);
 
-typedef std::function<std::string(const std::string& domain, const std::string& path)>
+//typedef std::function<std::vector<std::string>(const std::string& domain, const std::string& path)>
+//     CookieFunc_t;
+
+typedef std::function<std::vector<std::string>(const std::string& url)>
      CookieFunc_t;
 
 boost::system::error_code redirectHttpGetCookie(
     std::ostream& out, ss1x::http::Headers& header, const std::string& url,
-    CookieFunc_t&&, const ss1x::http::Headers& request_header = {});
+    CookieFunc_t&& = ss1x::cookie::get, const ss1x::http::Headers& request_header = {});
 
 boost::system::error_code redirectHttpGet(
     std::ostream& out, ss1x::http::Headers& header, const std::string& url,
+    const ss1x::http::Headers& request_header = {});
+
+boost::system::error_code redirectHttpPost(
+    std::ostream& out, ss1x::http::Headers& header, const std::string& url,
+    const std::string& post_content,
     const ss1x::http::Headers& request_header = {});
 
 // NOTE 关于通过本地http proxy，获取https资源
