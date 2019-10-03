@@ -6,7 +6,6 @@
 #include <boost/algorithm/hex.hpp>
 #include <boost/detail/endian.hpp>
 #include <boost/range/iterator_range_core.hpp>
-#include <boost/uuid/sha1.hpp>
 #include <iostream>
 #include <vector>
 // 算法参考
@@ -21,10 +20,11 @@
 // 后，重复5次即可。
 namespace ss1x {
 namespace uuid {
-class sha1 : private boost::uuids::detail::sha1 {
+class sha1 {
 public:
+    static const size_t default_buffsize = 1024u * 128u;
     static std::string fromFile(const std::string& fname,
-                                size_t buffsize = 1024u * 128u);
+                                size_t buffsize = default_buffsize);
 
     static std::string fromBytes(const char * buf,
                                  size_t buffsize);
