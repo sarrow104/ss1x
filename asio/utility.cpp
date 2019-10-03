@@ -19,6 +19,7 @@ public:
     {
         this->add("http");
         this->add("https");
+        this->add("thunder");
         this->add("ftp");
     }
     ~protocal_words() = default;
@@ -37,7 +38,7 @@ const ss1x::parser::rule& get_protocal_p()
 const ss1x::parser::rule& get_domain_p()
 {
     static ss1x::parser::rule domain_p = ss1x::parser::sequence("//") >>
-        (+(ss1x::parser::alnum_p | ss1x::parser::char_p('-')) %
+        (+(ss1x::parser::alnum_p | ss1x::parser::char_p('=') | ss1x::parser::char_p('-')) %
          ss1x::parser::char_p('.')) >>
         &(ss1x::parser::char_p('/') | ss1x::parser::char_p(':') | ss1x::parser::eof_p);
     return domain_p;
