@@ -5,7 +5,9 @@
 
 #include "socket_t.hpp"
 #include "user_agent.hpp"
+#include "stream.hpp"
 #include "gzstream.hpp"
+#include "brstream.hpp"
 
 #include <cctype>
 
@@ -358,15 +360,13 @@ public:
           m_chunk_size(0),
           m_response_content_length(-1),
           m_max_redirect(5),
-          m_is_gzip(false),
           m_stoped(false),
           m_request(2048),
           m_response(2048),
           m_deadline(io_service)
     {
 
-        COLOG_TRIGER_DEBUG(m_request.max_size());
-        COLOG_TRIGER_DEBUG(m_response.max_size());
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_request.max_size()), SSS_VALUE_MSG(m_response.max_size()));
         if (p_ctx) {
             m_socket.upgrade_to_ssl(*p_ctx);
         }
@@ -458,12 +458,25 @@ private:
     {
         // auto url_info = ss1x::util::url::split_port_auto(get_url());
         // auto& url_info = this->m_u;
+        COLOG_TRIGER_INFO(
+            SSS_VALUE_MSG(is_need_ssl(m_url_info)),
+            SSS_VALUE_MSG(m_socket.is_ssl_enabled()),
+            SSS_VALUE_MSG(m_socket.using_ssl()),
+            SSS_VALUE_MSG(m_socket.has_ssl()));
+
         if (is_need_ssl(m_url_info)) {
             m_socket.upgrade_to_ssl();
         }
         else {
             m_socket.disable_ssl();
         }
+
+        COLOG_TRIGER_INFO(
+            SSS_VALUE_MSG(is_need_ssl(m_url_info)),
+            SSS_VALUE_MSG(m_socket.is_ssl_enabled()),
+            SSS_VALUE_MSG(m_socket.using_ssl()),
+            SSS_VALUE_MSG(m_socket.has_ssl()));
+
         http_get_impl(std::get<1>(m_url_info), std::get<2>(m_url_info), std::get<3>(m_url_info));
     }
 
@@ -510,11 +523,11 @@ private:
 
     void http_get_impl(const std::string& server, int port, const std::string& path)
     {
-        COLOG_TRIGER_DEBUG(sss::raw_string(server), port, sss::raw_string(path));
+        COLOG_TRIGER_INFO(sss::raw_string(server), port, sss::raw_string(path));
 
         this->startTimer();
 
-        char port_buf[10];
+        char port_buf[24];
         std::sprintf(port_buf, "%d", port <= 0 ? 80 : port);
 
         boost::asio::ip::tcp::resolver::query query(server, port_buf);
@@ -541,7 +554,12 @@ private:
         }
         COLOG_TRIGER_DEBUG(sss::raw_string(m_proxy_hostname), m_proxy_port);
 
-        char port_buf[10];
+        // int32_t -> 11 + 1bytes
+        // int64_t -> 21 bytes
+
+        // ceil(log_10(2^64)) + 1 = 21 bytes
+        // ceil(log_10(2^32)) + 1) = 11 bytes
+        char port_buf[24];
         std::sprintf(port_buf, "%d", m_proxy_port <= 0 ? 80 : m_proxy_port);
 
         this->startTimer();
@@ -888,7 +906,11 @@ private:
         // 不然，无法正常从图床获取图片，而是给你一个frame，再显示图片。
         // requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "gzip, deflate, sdch");
         // 参考： https://imququ.com/post/vary-header-in-http.html
-        requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "gzip, deflate, sdch");
+        // NOTE 2019-09-19 add `br`
+        // NOTE 2019-10-04 `sdch' is for developed by google, and supported by chrome only; so ...
+        // https://www.cnblogs.com/xingzc/p/9082035.html
+        // https://cloud.tencent.com/developer/section/1189886
+        requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "br, gzip, deflate");
 
         if (m_request_headers.has("Referer")) {
             requestStreamHelper(used_field, m_request_headers, request_stream, "Referer", "");
@@ -1253,23 +1275,26 @@ private:
         }
 
         if (m_onContent && m_response_headers.has("Content-Encoding")) {
-            m_is_gzip = true;
             const auto& content_encoding = m_response_headers.get("Content-Encoding");
             if (content_encoding == "gzip") {
-                m_gzstream.reset(new ss1x::gzstream(ss1x::gzstream::mt_gzip));
+                m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_gzip));
             }
             else if (content_encoding == "zlib") {
-                m_gzstream.reset(new ss1x::gzstream(ss1x::gzstream::mt_zlib));
+                m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_zlib));
             }
             else if (content_encoding == "deflate") {
-                m_gzstream.reset(new ss1x::gzstream(ss1x::gzstream::mt_deflate));
+                m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_deflate));
+            }
+            else if (content_encoding == "br")
+            {
+                m_stream.reset(new ss1x::brstream);
             }
             else {
-                m_is_gzip = false;
+                COLOG_ERROR("not support Content-Encoding ", content_encoding);
             }
 
-            if (m_gzstream) {
-                m_gzstream->set_on_avail_out(m_onContent);
+            if (m_stream) {
+                m_stream->set_on_avail_out(m_onContent);
             }
         }
 
@@ -1358,11 +1383,6 @@ private:
             m_has_eof = (err == boost::asio::error::eof);
             set_error_code(err);
             return;
-        }
-
-        if (m_is_gzip && m_gzstream) {
-            // NOTE 这样做，是否有必要？
-            m_gzstream->init();
         }
 
         boost::asio::async_read(
@@ -1687,6 +1707,7 @@ protected:
         this->m_deadline.cancel();
         this->m_stoped = true;
         if (m_onFinished) {
+            COLOG_DEBUG(ec);
             m_onFinished();
         }
     }
@@ -1762,12 +1783,9 @@ protected:
                     m_response_content_length -= bytes_transferred;
                 }
             }
-            if (m_is_gzip) {
-                if (!m_gzstream) {
-                    SSS_POSITION_THROW(std::runtime_error, "m_is_gzip, m_gzstream not match!");
-                }
+            if (m_stream) {
                 int ec = 0;
-                int covert_cnt = m_gzstream->inflate(sv, &ec);
+                int covert_cnt = m_stream->inflate(sv, &ec);
                 if (ec < 0 && ec != Z_BUF_ERROR && covert_cnt <= 0) {
                     COLOG_TRIGER_ERROR(SSS_VALUE_MSG(ec));
                     SSS_POSITION_THROW(std::runtime_error, "inflate error!");
@@ -1807,9 +1825,8 @@ private:
     // 1 表示可以跳转一次；以此类推
     size_t                         m_max_redirect;
 
-    bool                            m_is_gzip;
-    bool                            m_stoped;
-    std::unique_ptr<ss1x::gzstream> m_gzstream;
+    bool                           m_stoped;
+    std::unique_ptr<ss1x::stream>  m_stream;
 
     boost::asio::streambuf         m_request;
     boost::asio::streambuf         m_response;
