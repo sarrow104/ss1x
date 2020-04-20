@@ -1,14 +1,18 @@
 #pragma once
 
-#include <zlib.h>
+#include <ss1x/asio/stream.hpp>
 
-#include <boost/asio/error.hpp>
+#include <zlib.h>
 
 #include <sss/colorlog.hpp>
 
 namespace ss1x {
-struct gzstream
+
+class gzstream : public ss1x::stream
 {
+    typedef ss1x::stream base_type;
+
+public:
     enum method_t
     {
         mt_none = 0,
@@ -17,18 +21,10 @@ struct gzstream
         mt_deflate = 3
     };
 
-    std::function<void(sss::string_view s)> m_on_avail_out;
+private:
+    on_avial_out_func_type m_on_avail_out;
 
-    void set_on_avail_out(const std::function<void(sss::string_view s)>& func)
-    {
-        m_on_avail_out = func;
-    }
-
-    void set_on_avail_out(std::function<void(sss::string_view s)>&& func)
-    {
-        m_on_avail_out = std::move(func);
-    }
-
+public:
     gzstream()
         : m_method(mt_none)
     {
@@ -46,12 +42,11 @@ struct gzstream
 
     ~gzstream()
     {
-        if (m_method) {
-            inflateEnd(&m_stream);
-            m_method = mt_none;
-        }
+        this->close();
+        m_method = mt_none;
     }
 
+private:
     method_t m_method;
     // zlib支持.
     z_stream m_stream;
@@ -59,20 +54,16 @@ struct gzstream
     // 解压缓冲.
     char m_zlib_buffer[1024];
 
+protected:
     // 输入的字节数.
     // std::size_t m_zlib_buffer_size;
-
     void init(method_t m);
-    void init()
-    {
-        this->init(m_method);
-    }
 
+    void close();
+
+public:
     int  inflate(const char * data, size_t size, int* p_ec = nullptr);
-    int  inflate(sss::string_view sv, int * p_ec = nullptr)
-    {
-        return inflate(sv.data(), sv.size(), p_ec);
-    }
-};
+}; // gzstream
+
 } // namespace ss1x
 
