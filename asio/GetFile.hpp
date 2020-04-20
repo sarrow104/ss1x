@@ -68,6 +68,14 @@ boost::system::error_code redirectHttpPost(
     const std::string& post_content,
     const ss1x::http::Headers& request_header = {});
 
+boost::system::error_code redirectHttpPostCookie(
+    std::ostream&              out,
+    ss1x::http::Headers&       header,
+    const std::string&         url,
+    const std::string&         post_content,
+    CookieFunc_t&&             cookieFun,
+    const ss1x::http::Headers& request_header);
+
 // NOTE 关于通过本地http proxy，获取https资源
 // 关键词：https asio Tunneling proxy connect
 // 相关网页：
@@ -146,6 +154,18 @@ boost::system::error_code proxyRedirectHttpGetCookie(
 boost::system::error_code proxyRedirectHttpGet(
     std::ostream& out, ss1x::http::Headers& header,
     const std::string& proxy_domain, int proxy_port, const std::string& url,
+    const ss1x::http::Headers& request_header = {});
+
+boost::system::error_code proxyRedirectHttpPostCookie(
+    std::ostream& out, ss1x::http::Headers& header,
+    const std::string& proxy_domain, int proxy_port, const std::string& url,
+    const std::string& post_content,
+    CookieFunc_t&&, const ss1x::http::Headers& request_header = {});
+
+boost::system::error_code proxyRedirectHttpPost(
+    std::ostream& out, ss1x::http::Headers& header,
+    const std::string& proxy_domain, int proxy_port, const std::string& url,
+    const std::string& post_content,
     const ss1x::http::Headers& request_header = {});
 }  // namespace asio
 }  // namespace ss1x
