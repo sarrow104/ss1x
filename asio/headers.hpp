@@ -3,6 +3,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <sss/utlstring.hpp>
 
 //! https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html
 // NOTE
@@ -10,8 +11,8 @@
 
 namespace ss1x {
 namespace http {
-class Headers : public std::map<std::string, std::string> {
-    typedef std::map<std::string, std::string> BaseT;
+class Headers : public std::map<std::string, std::string, sss::stricmp_t> {
+    typedef std::map<std::string, std::string, sss::stricmp_t> BaseT;
 
 public:
     Headers() : status_code(0) {}
@@ -43,6 +44,11 @@ public:
     bool has(const std::string& key) const
     {
         return this->BaseT::find(key) != this->BaseT::end();
+    }
+
+    size_t unset(const std::string& key)
+    {
+        return this->BaseT::erase(key);
     }
 
     bool has_kv(const std::string& key, const std::string& value) const
