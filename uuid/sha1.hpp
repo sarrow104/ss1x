@@ -1,3 +1,5 @@
+#pragma once
+
 #include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
