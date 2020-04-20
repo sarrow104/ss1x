@@ -16,6 +16,8 @@
 #include <boost/system/system_error.hpp>
 #include <boost/system/error_code.hpp>
 
+#include <zlib.h>
+
 #ifndef BOOST_SYSTEM_NOEXCEPT
 #define BOOST_SYSTEM_NOEXCEPT BOOST_NOEXCEPT
 #endif
@@ -218,6 +220,8 @@ enum errc_t
 	/// SOCKS no identd running.
 	socks_identd_error,
 
+    // server implemente error
+
     /// DEADLIME_TIMER runout
     deadline_timer_error,
 
@@ -225,7 +229,25 @@ enum errc_t
     user_ctrl_c_error,
 
 	/// Fake continue!
-	fake_continue
+	fake_continue,
+
+    /// stream-decoder-br-init-failed
+    stream_decoder_br_init_failed,
+
+    /// stream_decoder_corrupt_input
+    stream_decoder_corrupt_input,
+
+    stream_decoder_gzip_start,
+#define SSS_ABS(v) ((v) >= 0 ? (v) : -(v))
+    stream_decoder_gzip_Z_ERRNO         = stream_decoder_gzip_start + SSS_ABS(Z_ERRNO),
+    stream_decoder_gzip_Z_STREAM_ERROR  = stream_decoder_gzip_start + SSS_ABS(Z_STREAM_ERROR),
+    stream_decoder_gzip_Z_DATA_ERROR    = stream_decoder_gzip_start + SSS_ABS(Z_DATA_ERROR),
+    stream_decoder_gzip_Z_MEM_ERROR     = stream_decoder_gzip_start + SSS_ABS(Z_MEM_ERROR),
+    stream_decoder_gzip_Z_VERSION_ERROR = stream_decoder_gzip_start + SSS_ABS(Z_VERSION_ERROR),
+#undef SSS_ABS
+
+    // error_max
+    error_max
 };
 
 /// Converts a value of type @c errc_t to a corresponding object of type
@@ -386,6 +408,24 @@ class error_category_impl
             return "User CTRL-C error";
 		case errc::fake_continue:
 			return "Fake continue";
+        case errc::stream_decoder_br_init_failed:
+            return "stream decoder br init failed";
+        case errc::stream_decoder_corrupt_input:
+            return "stream decoder corrupt input";
+
+        case errc::stream_decoder_gzip_start:
+            return "stream_decoder_gzip_start";
+        case errc::stream_decoder_gzip_Z_ERRNO:
+            return "stream_decoder_gzip_Z_ERRNO";
+        case errc::stream_decoder_gzip_Z_STREAM_ERROR:
+            return "stream_decoder_gzip_Z_STREAM_ERROR";
+        case errc::stream_decoder_gzip_Z_DATA_ERROR:
+            return "stream_decoder_gzip_Z_DATA_ERROR";
+        case errc::stream_decoder_gzip_Z_MEM_ERROR:
+            return "stream_decoder_gzip_Z_MEM_ERROR";
+        case errc::stream_decoder_gzip_Z_VERSION_ERROR:
+            return "stream_decoder_gzip_Z_VERSION_ERROR";
+
 		default:
 			return "Unknown HTTP error";
 		}
