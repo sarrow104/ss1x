@@ -617,7 +617,7 @@ boost::system::error_code proxyRedirectHttpPostCookie(
         return sv.find("</html>") != sss::string_view::npos;
     });
 #endif
-    c.ssl_tunnel_get(proxy_domain, proxy_port, url);
+    c.ssl_tunnel_post(proxy_domain, proxy_port, url, post_content);
     io_service.run();
     COLOG_DEBUG(SSS_VALUE_MSG(c.header().status_code));
     header = c.header();
