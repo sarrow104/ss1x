@@ -6,12 +6,114 @@
 #include <ss1x/parser/oparser.hpp>
 
 #include <sss/path.hpp>
+#include <sss/colorlog.hpp>
 
 #include "utility.hpp"
 
 namespace ss1x {
 namespace util {
 namespace url {
+
+bool decode(std::string& url)
+{
+    // COLOG_DEBUG(url);
+    bool modified = false;
+    size_t i = 0;
+    for (; i != url.size(); ++i) {
+        if (url[i] == '%') {
+            break;
+        }
+    }
+    for (size_t j = i; j != url.size(); ++j) {
+        modified = true;
+        if (url[j] == '%' && j + 2 < url.size() && std::isxdigit(url[j + 1]) && std::isxdigit(url[j + 2])) {
+            url[i] = (sss::hex2int(url[j + 1]) << 4u) | sss::hex2int(url[j + 2]);
+            j += 2;
+            ++i;
+        }
+        else {
+            url[i++] = url[j];
+        }
+    }
+    url.resize(i);
+    // COLOG_DEBUG(url);
+    return modified;
+}
+
+// 1. +    URL中+号表示空格             %2B
+// 2. 空格 URL中的空格可以用+号或者编码 %20
+// 3. /    分隔目录和子目录             %2F
+// 4. ?    分隔实际的URL和参数          %3F
+// 5. %    指定特殊字符                 %25
+// 6. #    表示书签                     %23
+// 7. &    URL中指定的参数间的分隔符    %26
+// 8. =    URL中指定参数的值            %3D
+
+static bool is_special_url_char(char c)
+{
+    switch (c)
+    {
+        case '+':
+        case ' ':
+        //case '/':
+        case '?':
+        case '%':
+        case '#':
+        case '&':
+        case '=':
+        case '\\':
+            return true;
+        default:
+            if (0x80 & c)
+            {
+                return true;
+            }
+            else if (std::isspace(c))
+            {
+                return true;
+            }
+            else 
+            {
+                return false;
+            }
+    }
+}
+
+bool encode(std::string& path)
+{
+    // COLOG_DEBUG(path);
+    bool modified = false;
+    std::string url;
+    size_t i = 0;
+    // find the first char which need to be replaced
+    for (; i != path.size(); ++i) {
+        if (is_special_url_char(path[i])) {
+            if (i && i < path.size() - 1) {
+                url = path.substr(0, i);
+                modified = true;
+            }
+            break;
+        }
+    }
+    for (; i != path.size(); ++i) {
+        if (path[i] == '\\') { // replace '\\' with '/'
+            url += '/';
+        }
+        else if(is_special_url_char(path[i])) {
+            url += '%';
+            url += sss::lower_hex2char(path[i] >> 4u);
+            url += sss::lower_hex2char(path[i]);
+        }
+        else {
+            url += path[i];
+        }
+    }
+    // COLOG_DEBUG(url);
+    if (modified) {
+        url.swap(path);
+    }
+    return modified;
+}
 
 class protocal_words : public ss1x::parser::KeywordsList {
 public:

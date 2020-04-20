@@ -14,6 +14,25 @@ class rule;
 }  // namespace parser
 namespace util {
 namespace url {
+
+bool decode(std::string& url);
+
+inline std::string decode_copy(const std::string& url)
+{
+    auto out_url = url;
+    decode(out_url);
+    return out_url;
+}
+
+bool encode(std::string& path);
+
+inline std::string encode_copy(const std::string& path)
+{
+    auto out_url = path;
+    encode(out_url);
+    return out_url;
+}
+
 // 协议字符串、域名、显式端口号、pathcommand
 std::tuple<std::string, std::string, int, std::string> split(
     const std::string& url);
