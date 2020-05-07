@@ -350,6 +350,11 @@ public:
     typedef std::function<bool(const std::string& domain, const std::string& sever_cookie)>
              SetCookieFunc_t;
 
+    static bool s_is_status_code_ok(int status_code)
+    {
+        return status_code / 100 == 2;
+    }
+
 public:
     proxy_tunnel_client(boost::asio::io_service& io_service,
                         boost::asio::ssl::context* p_ctx = nullptr)
@@ -416,6 +421,8 @@ public:
     void ssl_tunnel_get(const std::string& proxy_domain, int proxy_port,
                         const std::string& url)
     {
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(proxy_domain), SSS_VALUE_MSG(proxy_port), SSS_VALUE_MSG(url), SSS_VALUE_MSG(m_request_headers));
+
         m_method = method_t(method_t::E_GET);
         this->initUrl(url);
         // m_redirect_urls.resize(0);
@@ -643,19 +650,14 @@ private:
         std::ostream request_stream(&m_request);
         // auto url_info = ss1x::util::url::split_port_auto(get_url());
         if (std::get<0>(m_url_info) == "https") {
-            request_stream << "CONNECT " << std::get<1>(m_url_info);
-            if (std::get<2>(m_url_info) != 80) {
-                request_stream << ":" << std::get<2>(m_url_info);
-            }
-            request_stream << " HTTP/1.1\r\n";
-            request_stream << "Host: " << std::get<1>(m_url_info) << "\r\n";
-            request_stream << "Accept: text/html, application/xhtml+xml, */*\r\n";
+            request_stream << "CONNECT " << std::get<1>(m_url_info) << ":" << std::get<2>(m_url_info) << " HTTP/1.1\r\n";
+            request_stream << "Host: " << std::get<1>(m_url_info) << ":" << std::get<2>(m_url_info) << "\r\n";
             request_stream << "User-Agent: " << USER_AGENT_DEFAULT << "\r\n";
 #if 1
             // NOTE 貌似 是否close，对于结果没啥影响
             // request_stream << "Connection: close\r\n\r\n";
             // NOTE 服务端可以主动发出 close动作，来提示，中断链接
-            request_stream << "Connection: ""keep-alive""\r\n\r\n";
+            request_stream << "Proxy-Connection: ""keep-alive""\r\n";
 #endif
             request_stream << "\r\n";
 
@@ -685,7 +687,7 @@ private:
             set_error_code(err);
             return;
         }
-        boost::asio::async_read_until(sock, m_response, "\r\n",
+        boost::asio::async_read_until(sock, m_response, "\r\n\r\n",
           boost::bind(&proxy_tunnel_client::handle_https_proxy_status<Stream>,
                       this,
                       boost::ref(sock), boost::asio::placeholders::error));
@@ -751,7 +753,7 @@ private:
         // processHeader(m_response_headers, response_stream);
 
         // Write whatever content we already have to output.
-        if (m_response.size() > 0 && this->header().status_code == 200) {
+        if (m_response.size() > 0 && s_is_status_code_ok(this->header().status_code)) { // 200
             COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
             consume_content(m_response);
         }
@@ -880,8 +882,9 @@ private:
             // 还有，如果chunk数，太大了怎么办？另外，读取chunk数，本身的时候，
             // 被截断了，怎么办？
             // 只能是状态机了！
-            COLOG_TRIGER_DEBUG("http_version", "1.0");
-            request_stream << "1.0";
+            const char * http_version = "1.1";
+            COLOG_TRIGER_DEBUG("http_version", http_version);
+            request_stream << http_version;
         }
         request_stream << "\r\n";
 
@@ -1250,6 +1253,10 @@ private:
                 break;
 
             case 200:
+            case 201:
+            case 202:
+            case 204:
+            case 206:
                 if (m_response_headers.has_kv("Transfer-Encoding", "chunked")) { // 将chunked处理，移动到跳转的后面
                     this->m_chunked_transfer = true;
                     COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
@@ -1298,7 +1305,17 @@ private:
             }
         }
 
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
+
         if (m_chunked_transfer) {
+            if (m_response.size() > 0 && s_is_status_code_ok(this->header().status_code)) { // 200
+                COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
+                consume_content(m_response);
+            }
+            else {
+                discard(m_response);
+            }
+
             boost::asio::async_read_until(
                 m_socket, m_response, "\r\n",
                 boost::bind(&proxy_tunnel_client::handle_read_chunk_head, this,
@@ -1310,7 +1327,7 @@ private:
             if (m_response.size() && m_response_content_length != -1) {
                 m_response_content_length -= m_response.size();
             }
-            if (m_response.size() > 0 && this->header().status_code == 200) {
+            if (m_response.size() > 0 && s_is_status_code_ok(this->header().status_code)) { // 200
                 COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
                 consume_content(m_response);
             }
@@ -1526,6 +1543,11 @@ private:
     {
         RET_ON_STOP;
         COLOG_TRIGER_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
+        if (!bytes_transferred && int(m_response.size()) >= m_chunk_size)
+        {
+            bytes_transferred = m_chunk_size;
+        }
+
         if (bytes_transferred <= 0) {
             // NOTE hand-made eof mark
             set_error_code(boost::asio::error::eof);
@@ -1537,12 +1559,13 @@ private:
                        (m_response_content_length == bytes_transferred ||
                         this->is_end_chunk(m_response))) ||
                       (m_chunked_transfer && !m_chunk_size);
-        if (m_onContent && this->header().status_code == 200) {
+        if (m_onContent && s_is_status_code_ok(this->header().status_code)) { // 200
             consume_content(m_response, bytes_transferred);
         }
         else {
             discard(m_response, bytes_transferred);
         }
+        m_chunk_size -= bytes_transferred;
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
         if (is_end) {
@@ -1555,11 +1578,21 @@ private:
             // NOTE boost::asio::error::eof 打印输出 asio.misc:2
             m_has_eof = (err == boost::asio::error::eof);
             set_error_code(err);
+
+            if (m_has_eof && m_response.size())
+            {
+                // TODO FIXME
+                // NOTE 如果buffer中，还有数据没有处理完，但是流已经结束，应该怎么办？
+                // 没法再利用asio的异步机制了。
+                // 难道只能自己递归？堆叠函数？
+                // 还是说，
+                // 往已有的上述方法中，塞入一个eof的路径？
+            }
             if (!m_chunk_size) {
                 return;
             }
             if (m_has_eof && m_chunk_size) {
-                if (m_onContent && this->header().status_code == 200) {
+                if (m_onContent && s_is_status_code_ok(this->header().status_code)) { // 200
                     consume_content(m_response, m_chunk_size);
                 }
                 else {
