@@ -60,9 +60,17 @@ public:
     // This simply instantiates the internal state to support ssl. It does not perform the handshake.
     void upgrade_to_ssl()
     {
+        // == Info:   CAfile: /etc/ssl/certs/ca-certificates.crt
+        //   CApath: /etc/ssl/certs
+        // => Send SSL data, 5 bytes (0x5)
+        // 0000: .....
+        // == Info: TLSv1.3 (OUT), TLS handshake, Client hello (1):
+
         std::lock_guard<std::mutex> lock(m_socket_lock);
         if (!has_ssl()) {
-            boost::asio::ssl::context ssl_context(boost::asio::ssl::context::sslv23);
+            // /home/sarrow/extra/boost1_67/include/boost/asio/ssl/context_base.hpp:81
+            //boost::asio::ssl::context ssl_context(boost::asio::ssl::context::sslv23);
+            boost::asio::ssl::context ssl_context(boost::asio::ssl::context::tlsv12);
             ssl_context.set_default_verify_paths();
             ssl_context.set_options(boost::asio::ssl::context::default_workarounds);
             m_ssl_stream.reset(new ssl_socket_t(m_socket, ssl_context));
