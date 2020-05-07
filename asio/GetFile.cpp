@@ -503,7 +503,9 @@ boost::system::error_code redirectHttpGetCookie(std::ostream& out,
             io_service.stop();
         });
     c.setOnContent(
-        [&out](sss::string_view response) -> void { out << response; });
+        [&out](sss::string_view response) -> void {
+            out << response;
+        });
     c.setCookieFunc(std::move(cookieFun));
     c.http_get(url);
     // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
@@ -548,7 +550,9 @@ boost::system::error_code proxyRedirectHttpGetCookie(
             io_service.stop();
         });
     c.setOnContent(
-        [&out](sss::string_view response) -> void { out << response; });
+        [&out](sss::string_view response) -> void {
+            out << response;
+        });
     c.setCookieFunc(std::move(cookieFun));
     c.setSetCookieFunc(ss1x::cookie::set);
     // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
@@ -607,7 +611,9 @@ boost::system::error_code proxyRedirectHttpPostCookie(
             io_service.stop();
         });
     c.setOnContent(
-        [&out](sss::string_view response) -> void { out << response; });
+        [&out](sss::string_view response) -> void {
+            out << response;
+        });
     c.setCookieFunc(std::move(cookieFun));
     c.setSetCookieFunc(ss1x::cookie::set);
     // 现有的实现，有少许问题，不能立即检测到此种连接方式(prox-https)的eof。
