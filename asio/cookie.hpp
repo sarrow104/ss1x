@@ -76,7 +76,13 @@ public:
                         }
                         else if (detail::icase_equal(key, "expires"))
                         {
-                            this->p_expire_.reset(new sss::time::Date(value.to_string(), "%a, %d %b %Y %X GMT"));
+                            this->p_expire_.reset(
+                                new sss::time::Date(
+                                    value.to_string(),
+                                    value.find("-") == sss::string_view::npos
+                                    ? "%a, %d %b %Y %X GMT"
+                                    : "%a, %d-%b-%Y %X GMT")
+                                );
                         }
                         else {
                             this->ext_keyval_[key.to_string()] = value.to_string();
