@@ -223,6 +223,10 @@ public:
             }
             switch (m_headers.status_code) {
                 case 200:
+                case 201:
+                case 202:
+                case 204:
+                case 206:
                     break;
 
                 case 301:
@@ -276,7 +280,7 @@ public:
             }
 
             // Write whatever content we already have to output.
-            if (m_response.size() > 0 && this->header().status_code == 200) {
+            if (m_response.size() > 0 && this->header().status_code/100 == 2) { // 200
                 COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
                 if (m_onResponse) {
                     m_onResponse(m_response);
@@ -303,7 +307,7 @@ public:
             // Write all of the data that has been read so far.
             COLOG_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
-            if (m_onResponse && this->header().status_code == 200) {
+            if (m_onResponse && this->header().status_code / 100 == 2) { // 200
                 m_onResponse(m_response);
             }
 
