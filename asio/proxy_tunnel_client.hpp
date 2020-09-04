@@ -663,6 +663,15 @@ private:
 
             COLOG_TRIGER_DEBUG(streambuf_view(m_request));
 
+            // NOTE
+            // copied from:
+            // https://github.com/boostorg/beast/blob/bfd4378c133b2eb35277be8b635adb3f1fdaf09d/example/http/client/sync-ssl/http_client_sync_ssl.cpp#L67
+            if(!SSL_set_tlsext_host_name(m_socket.get_ssl_socket().native_handle(), std::get<1>(m_url_info).c_str()))
+            {
+                boost::system::error_code ec{static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()};
+                throw boost::system::system_error{ec};
+            }
+
             boost::asio::async_write(
                 sock, m_request, boost::asio::transfer_exactly(m_request.size()),
                 boost::bind(
@@ -1214,6 +1223,8 @@ private:
         }
 
         // NOTE 此时 bytes_transferred == 2并且，response的buf中，必须为"\r\n"。
+        auto cr_nl = cast_string_view(m_response).substr(0, 2);
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(cr_nl));
         m_response.consume(2);
 
         COLOG_TRIGER_DEBUG(m_response_headers);
@@ -1252,18 +1263,12 @@ private:
                 }
                 break;
 
-            case 200:
-            case 201:
-            case 202:
-            case 204:
-            case 206:
+            default:
+                // for 200,...206,400,403...
                 if (m_response_headers.has_kv("Transfer-Encoding", "chunked")) { // 将chunked处理，移动到跳转的后面
                     this->m_chunked_transfer = true;
                     COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
                 }
-                break;
-
-            default:
                 break;
         }
 
@@ -1308,14 +1313,6 @@ private:
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
 
         if (m_chunked_transfer) {
-            if (m_response.size() > 0 && s_is_status_code_ok(this->header().status_code)) { // 200
-                COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
-                consume_content(m_response);
-            }
-            else {
-                discard(m_response);
-            }
-
             boost::asio::async_read_until(
                 m_socket, m_response, "\r\n",
                 boost::bind(&proxy_tunnel_client::handle_read_chunk_head, this,
@@ -1545,6 +1542,7 @@ private:
         COLOG_TRIGER_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
         if (!bytes_transferred && int(m_response.size()) >= m_chunk_size)
         {
+            COLOG_TRIGER_DEBUG("assgin bytes_transferred with m_chunk_size", bytes_transferred, m_chunk_size);
             bytes_transferred = m_chunk_size;
         }
 
@@ -1565,7 +1563,7 @@ private:
         else {
             discard(m_response, bytes_transferred);
         }
-        m_chunk_size -= bytes_transferred;
+        //m_chunk_size -= bytes_transferred;
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
         if (is_end) {
@@ -1793,7 +1791,8 @@ protected:
                                 SSS_POSITION_THROW(std::runtime_error,
                                                    "chunked data not end with ",
                                                    sss::raw_string(trail), ", but ",
-                                                   sss::raw_string(sv));
+                                                   sss::raw_string(sv), " while ",
+                                                   sss::raw_string(m_redirect_urls.back()));
                             }
                             sv.remove_suffix(trail_len);
                             m_chunk_size = 1;
