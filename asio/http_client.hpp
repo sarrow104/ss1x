@@ -100,7 +100,9 @@ public:
                     boost::asio::ssl::verify_peer);
 
                 m_socket.get_ssl_socket().set_verify_callback(boost::bind(
-                    &http_client::verify_certificate, this, _1, _2));
+                    &http_client::verify_certificate, this,
+                    boost::placeholders::_1,
+                    boost::placeholders::_2));
                 // TODO
                 // if (is_certificate()) {
                 //     ...
