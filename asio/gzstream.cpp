@@ -60,6 +60,7 @@ void gzstream::close()
 
 int gzstream::inflate(const char * data, size_t size, int * p_ec)
 {
+    //std::cout << sss::raw_string(data, size) << std::endl;
     COLOG_DEBUG(SSS_VALUE_MSG(size));
     if (m_stream.avail_in == 0) {
         m_stream.avail_in = size;
