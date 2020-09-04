@@ -69,10 +69,14 @@ public:
         std::lock_guard<std::mutex> lock(m_socket_lock);
         if (!has_ssl()) {
             // /home/sarrow/extra/boost1_67/include/boost/asio/ssl/context_base.hpp:81
-            //boost::asio::ssl::context ssl_context(boost::asio::ssl::context::sslv23);
-            boost::asio::ssl::context ssl_context(boost::asio::ssl::context::tlsv12);
+            boost::asio::ssl::context ssl_context(boost::asio::ssl::context::sslv23);
+            //boost::asio::ssl::context ssl_context(boost::asio::ssl::context::tlsv13);
             ssl_context.set_default_verify_paths();
-            ssl_context.set_options(boost::asio::ssl::context::default_workarounds);
+            ssl_context.set_options(boost::asio::ssl::context::default_workarounds
+                                    //| boost::asio::ssl::context::no_sslv2
+                                    //| boost::asio::ssl::context::single_dh_use
+                                    // | boost::asio::ssl::context::no_sslv3
+                                    );
             m_ssl_stream.reset(new ssl_socket_t(m_socket, ssl_context));
         }
         m_endable_ssl = true;
