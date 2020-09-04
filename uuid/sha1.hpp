@@ -1,15 +1,7 @@
 #pragma once
 
-#include <fcntl.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <boost/algorithm/hex.hpp>
-#include <boost/detail/endian.hpp>
-#include <boost/range/iterator_range_core.hpp>
-#include <iostream>
-#include <vector>
+#include <string>
+
 // 算法参考
 //! https://en.wikipedia.org/wiki/SHA-1
 // 代码参考：
@@ -30,6 +22,10 @@ public:
 
     static std::string fromBytes(const char * buf,
                                  size_t buffsize);
+
+    static std::string xorBytes(std::string& sha_id1, std::string& sha_id2);
+
+    static std::string fromFile5M(const std::string& fname);
 };
 }  // namespace uuid
 }  // namespace ss1x
