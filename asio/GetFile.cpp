@@ -1,3 +1,6 @@
+#include <boost/asio.hpp>
+#include <boost/asio/ssl.hpp>
+
 #include "GetFile.hpp"
 #include "headers.hpp"
 #include "http_client.hpp"
@@ -12,9 +15,6 @@
 #include <sstream>
 #include <string>
 #include <tuple>
-
-#include <boost/asio.hpp>
-#include <boost/asio/ssl.hpp>
 
 #include <sss/Terminal.hpp>
 #include <sss/debug/value_msg.hpp>
