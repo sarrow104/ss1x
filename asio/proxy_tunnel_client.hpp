@@ -560,8 +560,7 @@ private:
         std::sprintf(port_buf, "%d", port <= 0 ? 80 : port);
 
         boost::asio::ip::tcp::resolver::query query(server, port_buf);
-        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(server));
-        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(port));
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(server), SSS_VALUE_MSG(port));
         m_resolver.async_resolve(
             query, boost::bind(&proxy_tunnel_client::handle_resolve, this,
                                boost::asio::placeholders::error,
@@ -1570,8 +1569,10 @@ private:
     void handle_read_content(int bytes_transferred, const boost::system::error_code& err)
     {
         RET_ON_STOP;
-        COLOG_TRIGER_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
+
         assert(bytes_transferred >= 0);
+
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()), pretty_ec(err), SSS_VALUE_MSG(m_is_chunked), SSS_VALUE_MSG(m_content_to_read));
 
         int bytes_available
             = std::min<bytes_size_t>(m_response.size(), m_content_to_read);
@@ -1583,8 +1584,6 @@ private:
         else {
             discard(m_response, bytes_available);
         }
-
-        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()), pretty_ec(err), SSS_VALUE_MSG(m_is_chunked), SSS_VALUE_MSG(m_content_to_read));
 
         if (err && err != boost::asio::error::eof) {
             // NOTE boost::asio::error::eof 打印输出 asio.misc:2
@@ -1601,7 +1600,6 @@ private:
         }
 
         if (m_is_chunked) {
-            COLOG_TRIGER_DEBUG("async_read chunk_head");
             boost::asio::async_read_until(
                 m_socket, m_response, "\r\n",
                 boost::bind(&proxy_tunnel_client::handle_read_chunk_head, this,
@@ -1742,7 +1740,6 @@ protected:
         // 如果小于m_content_to_read，则都说明，还有数据。
         // 并且，最后两个字节，需要忽略！
         auto old_to_read = m_content_to_read;
-        COLOG_TRIGER_DEBUG(bytes_transferred, "out of", response.size());
 
         std::size_t size = response.size();
         if (bytes_transferred <= 0)
@@ -1759,9 +1756,23 @@ protected:
         if (m_onContent) {
             sss::string_view sv = cast_string_view(response).substr(0, bytes_transferred);
             if (m_is_chunked) {
-                if (m_content_to_read <= bytes_size_t(CRLF.size()))
+                if (m_content_to_read >= bytes_transferred + bytes_size_t(CRLF.size()))
                 {
-                    sv.remove_suffix(m_content_to_read);
+                    // NOTE nothing
+                }
+                else if (m_content_to_read == bytes_transferred + 1)
+                {
+                    sv.remove_suffix(1);
+                }
+                else if (m_content_to_read == bytes_transferred + 0)
+                {
+                    sv.remove_suffix(2);
+                }
+                else if (m_content_to_read < bytes_transferred)
+                {
+                    SSS_POSITION_THROW(
+                        std::runtime_error,
+                        "to many bytes_transferred");
                 }
             }
 
@@ -1771,13 +1782,12 @@ protected:
             if (sv.size())
             {
                 if (m_stream) {
-                    int ec = 0;
+                    boost::system::error_code ec;
                     int covert_cnt = m_stream->inflate(sv, &ec);
-                    if (ec && ec != Z_BUF_ERROR && covert_cnt <= 0) {
+                    if (ec && ec.value() != Z_BUF_ERROR && covert_cnt <= 0) {
                         COLOG_TRIGER_ERROR(SSS_VALUE_MSG(ec));
                         SSS_POSITION_THROW(std::runtime_error, "inflate error!");
-                        //boost::system::error_code e;
-                        //set_error_code(boost::system::error_code(ec));
+                        set_error_code(ec);
                     }
                 }
                 else {
@@ -1787,7 +1797,7 @@ protected:
         }
 
         response.consume(bytes_transferred);
-        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(old_to_read), SSS_VALUE_MSG(m_content_to_read), SSS_VALUE_MSG(bytes_transferred));
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_content_to_read), "<=", old_to_read, '-', bytes_transferred);
         if (old_to_read == m_content_to_read)
         {
             SSS_POSITION_THROW(std::runtime_error, "");
