@@ -86,7 +86,7 @@ int gzstream::inflate(const char * data, size_t size, int * p_ec)
                 p_ec);
         }
         auto current_cnt = sizeof(m_zlib_buffer) - m_stream.avail_out;
-        base_type::on_avail_out(sss::string_view(m_zlib_buffer, current_cnt));
+        base_type::on_avail_out(m_zlib_buffer, current_cnt);
         bytes_transferred += current_cnt;
     }
     return bytes_transferred;
