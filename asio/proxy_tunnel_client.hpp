@@ -388,11 +388,9 @@ public:
           m_content_to_read(0),
           m_max_redirect(5),
           m_stoped(false),
-          m_request(2048),
           m_response(2048),
           m_deadline(io_service)
     {
-
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_request.max_size()), SSS_VALUE_MSG(m_response.max_size()));
         if (p_ctx) {
             m_socket.upgrade_to_ssl(*p_ctx);
@@ -672,15 +670,15 @@ private:
         // auto url_info = ss1x::util::url::split_port_auto(get_url());
         if (std::get<0>(m_url_info) == "https") {
             request_stream << "CONNECT " << std::get<1>(m_url_info) << ":" << std::get<2>(m_url_info) << " HTTP/1.1\r\n";
-            request_stream << "Host: " << std::get<1>(m_url_info) << ":" << std::get<2>(m_url_info) << "\r\n";
-            request_stream << "User-Agent: " << USER_AGENT_DEFAULT << "\r\n";
+            request_stream << "Host: " << std::get<1>(m_url_info) << ":" << std::get<2>(m_url_info) << CRLF;
+            request_stream << "User-Agent: " << USER_AGENT_DEFAULT << CRLF;
 #if 1
             // NOTE 貌似 是否close，对于结果没啥影响
             // request_stream << "Connection: close\r\n\r\n";
             // NOTE 服务端可以主动发出 close动作，来提示，中断链接
-            request_stream << "Proxy-Connection: ""keep-alive""\r\n";
+            request_stream << "Proxy-Connection: ""keep-alive" << CRLF;
 #endif
-            request_stream << "\r\n";
+            request_stream << CRLF;
 
             COLOG_TRIGER_DEBUG(streambuf_view(m_request));
 
@@ -812,6 +810,7 @@ private:
                         boost::asio::placeholders::error));
     }
 
+    // NOTE if one filed value is empty, this will deprecated
     void requestStreamHelper(std::set<std::string>& used_field,
                              ss1x::http::Headers& request_header,
                              std::ostream& request_stream,
@@ -826,11 +825,20 @@ private:
         if (it != request_header.end())
         {
             if (!it->second.empty()) {
-                request_stream << field << ": " << it->second << "\r\n";
+                sss::string_view fd_value = it->second;
+                while(!fd_value.empty()) {
+                    auto pos = fd_value.find(CRLF);
+                    request_stream << field << ": " << fd_value.substr(0, pos) << CRLF;
+                    if (pos == sss::string_view::npos)
+                    {
+                        break;
+                    }
+                    fd_value = fd_value.substr(pos + 2);
+                }
             }
         }
         else if (!default_value.empty()) {
-            request_stream << field << ": " << default_value << "\r\n";
+            request_stream << field << ": " << default_value << CRLF;
         }
         used_field.insert(field);
     }
@@ -844,7 +852,7 @@ private:
             if (used_field.find(kv.first) != used_field.end()) {
                 continue;
             }
-            request_stream << kv.first << ": " << kv.second << "\r\n";
+            request_stream << kv.first << ": " << kv.second << CRLF;
         }
     }
 
@@ -922,16 +930,16 @@ private:
             COLOG_TRIGER_DEBUG("http_version", http_version);
             request_stream << http_version;
         }
-        request_stream << "\r\n";
+        request_stream << CRLF;
 
         std::set<std::string> used_field;
 
         // NOTE Host 需要手动拼凑
         if (m_proxy_hostname.empty()) {
-            request_stream << "Host: " << std::get<1>(m_url_info) << "\r\n";
+            request_stream << "Host: " << std::get<1>(m_url_info) << CRLF;
         }
         else {
-            request_stream << "Host: " << m_proxy_hostname << "\r\n";
+            request_stream << "Host: " << m_proxy_hostname << CRLF;
         }
         used_field.insert("Host");
 
@@ -972,7 +980,7 @@ private:
                 if (cookie.empty()) {
                     continue;
                 }
-                request_stream << "Cookie" << ": " << cookie << "\r\n";
+                request_stream << "Cookie" << ": " << cookie << CRLF;
                 ++cookie_cnt;
             }
             if (cookie_cnt) {
@@ -985,11 +993,11 @@ private:
         // 比如，分析：Content-Length: 4376 字段
         requestStreamHelper(used_field, m_request_headers, request_stream, "Connection", "close");
         requestStreamDumpRest(used_field, m_request_headers, request_stream);
-        request_stream << "\r\n";
+        request_stream << CRLF;
 
         // 2017-12-25
         if (m_method.is(method_t::E_POST)) {
-            request_stream << m_post_content << "\r\n";
+            request_stream << m_post_content << CRLF;
         }
 
         COLOG_TRIGER_DEBUG(streambuf_view(m_request));
@@ -1105,7 +1113,7 @@ private:
         auto pos = 0;
         size_t raw_header_length = 0;
         do {
-            auto end_pos = head_line_view.find("\r\n", pos);
+            auto end_pos = head_line_view.find(CRLF, pos);
             if (end_pos == sss::string_view::npos) {
                 this->set_error_code(ss1x::errc::malformed_status_line);
                 break;
