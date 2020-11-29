@@ -6,10 +6,7 @@
 
 #include <boost/asio/error.hpp>
 
-static const size_t kFileBufferSize = 1 << 19;
-
 namespace ss1x {
-
 
 int brstream::inflate(const char * data, size_t size, int * p_ec)
 {
@@ -30,6 +27,10 @@ int brstream::inflate(const char * data, size_t size, int * p_ec)
     //const char * data_bak = data;
     //size_t size_bak       = size;
 
+    // FIXME
+    base_type::on_avail_out(data, size);
+    return size;
+
     while (size != 0 && m_state == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT)
     {
         m_state
@@ -39,11 +40,22 @@ int brstream::inflate(const char * data, size_t size, int * p_ec)
                 &available_out, reinterpret_cast<uint8_t**>(&buffer),
                 0);
 
+        switch (m_state)
+        {
+#define __BSTREAM_LOG__(m) case m: COLOG_DEBUG(#m); break;
+            __BSTREAM_LOG__(BROTLI_DECODER_RESULT_ERROR);
+            __BSTREAM_LOG__(BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT);
+            __BSTREAM_LOG__(BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT);
+            __BSTREAM_LOG__(BROTLI_DECODER_RESULT_SUCCESS);
+#undef __BSTREAM_LOG__
+            default: COLOG_DEBUG(SSS_VALUE_MSG(m_state));
+        }
+
         if (m_state == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT ||
             m_state == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT)
         {
             auto current_cnt = m_buffer.size() - available_out;
-            base_type::on_avail_out(sss::string_view(m_buffer.data(), current_cnt));
+            base_type::on_avail_out(m_buffer.data(), current_cnt);
             available_out = m_buffer.size();
             buffer = &m_buffer[0];
             m_state = BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT;
@@ -52,15 +64,14 @@ int brstream::inflate(const char * data, size_t size, int * p_ec)
         }
         else if (m_state == BROTLI_DECODER_RESULT_SUCCESS)
         {
-            base_type::on_avail_out(sss::string_view(m_buffer.data(), m_buffer.size() - available_out));
+            base_type::on_avail_out(m_buffer.data(), m_buffer.size() - available_out);
 
             bytes_transferred += m_buffer.size() - available_out;
             break;
 
         }
-        else
+        else // BROTLI_DECODER_RESULT_ERROR == 0
         {
-            std::cout << SSS_VALUE_MSG(m_state) << std::endl;
             return base_type::on_err(
                 bytes_transferred,
                 ss1x::errc::stream_decoder_corrupt_input,
