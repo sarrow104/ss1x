@@ -37,6 +37,14 @@ public:
         }
     }
 
+    void on_avail_out(const char* data, size_t size)
+    {
+        if (m_on_avail_out)
+        {
+            m_on_avail_out({data, size});
+        }
+    }
+
     virtual int inflate(const char * data, size_t size, int* p_ec = nullptr) = 0;
     int inflate(sss::string_view sv, int * p_ec = nullptr)
     {
