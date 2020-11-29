@@ -8,7 +8,7 @@
 
 namespace ss1x {
 
-int echostream::inflate(const char * data, size_t size, int * p_ec)
+int echostream::inflate(const char * data, size_t size, error_code_type * p_ec)
 {
     COLOG_DEBUG(SSS_VALUE_MSG(size));
     (void)p_ec;

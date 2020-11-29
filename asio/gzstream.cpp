@@ -58,7 +58,7 @@ void gzstream::close()
     std::memset(&m_stream, 0, sizeof(m_stream));
 }
 
-int gzstream::inflate(const char * data, size_t size, int * p_ec)
+int gzstream::inflate(const char * data, size_t size, error_code_type* p_ec)
 {
     //std::cout << sss::raw_string(data, size) << std::endl;
     COLOG_DEBUG(SSS_VALUE_MSG(size));

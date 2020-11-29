@@ -15,6 +15,7 @@ class stream
 {
 public:
     typedef std::function<void(sss::string_view s)> on_avial_out_func_type;
+    typedef boost::system::error_code               error_code_type;
 
     stream() {}
     virtual ~stream() {};
@@ -45,8 +46,8 @@ public:
         }
     }
 
-    virtual int inflate(const char * data, size_t size, int* p_ec = nullptr) = 0;
-    int inflate(sss::string_view sv, int * p_ec = nullptr)
+    virtual int inflate(const char * data, size_t size, error_code_type* p_ec = nullptr) = 0;
+    int inflate(sss::string_view sv, error_code_type * p_ec = nullptr)
     {
         return this->inflate(sv.data(), sv.size(), p_ec);
     }
@@ -55,15 +56,15 @@ protected:
 
     int on_err(
         int bytes_transferred,
-        const boost::system::error_code& err,
-        int * p_ec)
+        const error_code_type& err,
+        error_code_type * p_ec)
     {
         if (err.value())
         {
             COLOG_ERROR(err.message());
         }
         if (p_ec) {
-            *p_ec = err.value();
+            *p_ec = err;
         }
 
         // 解压发生错误, 通知用户并放弃处理.

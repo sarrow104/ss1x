@@ -55,7 +55,7 @@ public:
      *
      * @return byte converted out
      */
-    int  inflate(const char * data, size_t size, int* p_ec = nullptr);
+    int  inflate(const char * data, size_t size, error_code_type* p_ec = nullptr);
 
 private:
     // brotli-decode支持.

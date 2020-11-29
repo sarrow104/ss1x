@@ -8,7 +8,7 @@
 
 namespace ss1x {
 
-int brstream::inflate(const char * data, size_t size, int * p_ec)
+int brstream::inflate(const char * data, size_t size, error_code_type * p_ec)
 {
     COLOG_DEBUG(SSS_VALUE_MSG(size));
 
@@ -24,12 +24,6 @@ int brstream::inflate(const char * data, size_t size, int * p_ec)
     int bytes_transferred = 0;
     char * buffer         = &m_buffer[0];
     size_t available_out  = m_buffer.size();
-    //const char * data_bak = data;
-    //size_t size_bak       = size;
-
-    // FIXME
-    base_type::on_avail_out(data, size);
-    return size;
 
     while (size != 0 && m_state == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT)
     {
