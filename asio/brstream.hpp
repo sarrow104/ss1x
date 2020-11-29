@@ -46,10 +46,15 @@ public:
         }
     }
 
-    // [in] data 输入buffer内存块开始
-    // [in] size 输入buffer内存块长度
-    // [out] p_ec 错误号
-    // [return] 转换出的内存长度
+    /**
+     * @brief inflate
+     *
+     * @param [in]data input memory buffer starting address
+     * @param [in]size input memory buffer size
+     * @param [out]p_ec write error code to when an error en-countered
+     *
+     * @return byte converted out
+     */
     int  inflate(const char * data, size_t size, int* p_ec = nullptr);
 
 private:
