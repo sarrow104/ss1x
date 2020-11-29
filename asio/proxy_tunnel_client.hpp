@@ -8,6 +8,7 @@
 #include "stream.hpp"
 #include "gzstream.hpp"
 #include "brstream.hpp"
+#include "echostream.hpp"
 
 #include <cctype>
 
@@ -73,6 +74,9 @@ inline int &ss1x_asio_ptc_deadline_wait_secends()
 }
 
 } // namespace detail
+
+static const sss::string_view CRLF{"\r\n"};
+static const sss::string_view CRLF2{"\r\n" "\r\n"};
 
 // NOTE 不定参数宏传递
 // #define func(args...) inner_call(##args) 
@@ -143,10 +147,10 @@ struct method_t
     }
 };
 
-struct streambuf_t
+struct streambuf_view_t
 {
     typedef boost::asio::streambuf value_type;
-    explicit streambuf_t(const value_type& streambuf) : m_streambuf(streambuf)
+    explicit streambuf_view_t(const value_type& streambuf) : m_streambuf(streambuf)
     {
     }
     void print(std::ostream& o) const
@@ -158,15 +162,15 @@ struct streambuf_t
     const value_type& m_streambuf;
 };
 
-inline std::ostream& operator << (std::ostream& o, const streambuf_t& b)
+inline std::ostream& operator << (std::ostream& o, const streambuf_view_t& b)
 {
     b.print(o);
     return o;
 }
 
-inline streambuf_t streambuf_view(const boost::asio::streambuf& stream)
+inline streambuf_view_t streambuf_view(const boost::asio::streambuf& stream)
 {
-    return streambuf_t{stream};
+    return streambuf_view_t{stream};
 }
 
 struct pretty_ec_t
@@ -196,64 +200,66 @@ inline pretty_ec_t pretty_ec(const boost::system::error_code& ec)
 namespace detail {
 
 template <typename Iterator>
-bool parse_http_status_line(Iterator begin, Iterator end,
-	int& version_major, int& version_minor, int& status)
+size_t parse_http_status_line(Iterator begin, Iterator end,
+    int& version_major, int& version_minor, int& status)
 {
-	enum
-	{
-		http_version_h,
-		http_version_t_1,
-		http_version_t_2,
-		http_version_p,
-		http_version_slash,
-		http_version_major_start,
-		http_version_major,
-		http_version_minor_start,
-		http_version_minor,
-		status_code_start,
-		status_code,
-		reason_phrase,
-		linefeed,
-		fail
-	} state = http_version_h;
+    enum
+    {
+        http_version_h,
+        http_version_t_1,
+        http_version_t_2,
+        http_version_p,
+        http_version_slash,
+        http_version_major_start,
+        http_version_major,
+        http_version_minor_start,
+        http_version_minor,
+        status_code_start,
+        status_code,
+        reason_phrase,
+        linefeed,
+        fail
+    } state = http_version_h;
 
-	Iterator iter = begin;
-	std::string reason;
-	while (iter != end && state != fail)
-	{
-		char c = *iter++;
-		switch (state)
-		{
-		case http_version_h:
-			state = (c == 'H') ? http_version_t_1 : fail;
-			break;
+    size_t consume_cnt = 0u;
+    Iterator iter = begin;
+    std::string reason;
+    while (iter != end && state != fail)
+    {
+        char c = *iter++;
+        ++consume_cnt;
+        switch (state)
+        {
+        case http_version_h:
+            state = (c == 'H') ? http_version_t_1 : fail;
+            break;
 
-		case http_version_t_1:
-			state = (c == 'T') ? http_version_t_2 : fail;
-			break;
+        case http_version_t_1:
+            state = (c == 'T') ? http_version_t_2 : fail;
+            break;
 
-		case http_version_t_2:
-			state = (c == 'T') ? http_version_p : fail;
-			break;
+        case http_version_t_2:
+            state = (c == 'T') ? http_version_p : fail;
+            break;
 
-		case http_version_p:
-			state = (c == 'P') ? http_version_slash : fail;
-			break;
+        case http_version_p:
+            state = (c == 'P') ? http_version_slash : fail;
+            break;
 
-		case http_version_slash:
-			state = (c == '/') ? http_version_major_start : fail;
-			break;
+        case http_version_slash:
+            state = (c == '/') ? http_version_major_start : fail;
+            break;
 
-		case http_version_major_start:
-			if (std::isdigit(c))
-			{
-				version_major = version_major * 10 + c - '0';
-				state = http_version_major;
-			}
-			else {
+        case http_version_major_start:
+            if (std::isdigit(c))
+            {
+                version_major = version_major * 10 + c - '0';
+                state = http_version_major;
+            }
+            else {
                 state = fail;
             }
-			break;
+            break;
 
         case http_version_major:
             if (c == '.') {
@@ -267,41 +273,41 @@ bool parse_http_status_line(Iterator begin, Iterator end,
             }
             break;
 
-		case http_version_minor_start:
-			if (std::isdigit(c))
-			{
-				version_minor = version_minor * 10 + c - '0';
-				state = http_version_minor;
-			}
-			else {
+        case http_version_minor_start:
+            if (std::isdigit(c))
+            {
+                version_minor = version_minor * 10 + c - '0';
+                state = http_version_minor;
+            }
+            else {
                 state = fail;
             }
-			break;
+            break;
 
-		case http_version_minor:
-			if (c == ' ') {
-				state = status_code_start;
+        case http_version_minor:
+            if (c == ' ') {
+                state = status_code_start;
             }
-			else if (std::isdigit(c)) {
+            else if (std::isdigit(c)) {
                 version_minor = version_minor * 10 + c - '0';
             }
-			else {
+            else {
                 state = fail;
             }
-			break;
+            break;
 
-		case status_code_start:
-			if (std::isdigit(c))
-			{
-				status = status * 10 + c - '0';
-				state = status_code;
-			}
-			else {
+        case status_code_start:
+            if (std::isdigit(c))
+            {
+                status = status * 10 + c - '0';
+                state = status_code;
+            }
+            else {
                 state = fail;
             }
-			break;
+            break;
 
-		case status_code:
+        case status_code:
             if (c == ' ') {
                 state = reason_phrase;
             }
@@ -326,13 +332,29 @@ bool parse_http_status_line(Iterator begin, Iterator end,
             break;
 
         case linefeed:
-            return (c == '\n');
+            if (c == '\n')
+            {
+                // NOTE `iter` now points to one bytes after '\n'
+                end = iter;
+            }
+            else
+            {
+                state = fail;
+            }
+            break;
 
-		default:
-			return false;
-		}
-	}
-	return false;
+        default:
+            state = fail;
+            break;
+        }
+    }
+
+    if (state == fail)
+    {
+        status = 0;
+    }
+    COLOG_TRIGER_DEBUG(sss::raw_string(std::string(begin, end)), SSS_VALUE_MSG(consume_cnt), SSS_VALUE_MSG(state == fail));
+    return consume_cnt;
 }
 } // namespace detail
 
@@ -342,6 +364,7 @@ bool parse_http_status_line(Iterator begin, Iterator end,
 // boost::asio::placeholders::bytes_transferred
 class proxy_tunnel_client {
 public:
+    typedef int64_t               bytes_size_t;
     typedef std::function<void()> onFinished_t;
     typedef std::function<void(sss::string_view response)> onResponce_t;
     typedef std::function<bool(sss::string_view mark)> onEndCheck_t;
@@ -361,9 +384,8 @@ public:
         : m_resolver(io_service),
           m_socket(io_service),
           m_has_eof(false),
-          m_chunked_transfer(false),
-          m_chunk_size(0),
-          m_response_content_length(-1),
+          m_is_chunked(false),
+          m_content_to_read(0),
           m_max_redirect(5),
           m_stoped(false),
           m_request(2048),
@@ -646,7 +668,7 @@ private:
 
             return;
         }
-        discard(m_response);
+        discard(m_response); // clean response before receive data
         std::ostream request_stream(&m_request);
         // auto url_info = ss1x::util::url::split_port_auto(get_url());
         if (std::get<0>(m_url_info) == "https") {
@@ -666,7 +688,7 @@ private:
             // NOTE
             // copied from:
             // https://github.com/boostorg/beast/blob/bfd4378c133b2eb35277be8b635adb3f1fdaf09d/example/http/client/sync-ssl/http_client_sync_ssl.cpp#L67
-            if(!SSL_set_tlsext_host_name(m_socket.get_ssl_socket().native_handle(), std::get<1>(m_url_info).c_str()))
+            if(!::SSL_set_tlsext_host_name(m_socket.get_ssl_socket().native_handle(), std::get<1>(m_url_info).c_str()))
             {
                 boost::system::error_code ec{static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()};
                 throw boost::system::system_error{ec};
@@ -715,23 +737,29 @@ private:
             return;
         }
 
-        boost::system::error_code ec;
+        const char* line_beg =
+            boost::asio::buffer_cast<const char*>(m_response.data());
+        const char* line_end = line_beg + m_response.size();
 
         // 解析状态行，
         // 检查http状态码；
         int version_major = 0;
         int version_minor = 0;
-        int status_code = 0;
-        if (!detail::parse_http_status_line(
-                std::istreambuf_iterator<char>(&m_response),
-                std::istreambuf_iterator<char>(), version_major, version_minor,
-                status_code)) {
-            ec = ss1x::errc::malformed_status_line;
+        int status_code   = 0;
+
+        size_t status_line_size
+            = detail::parse_http_status_line(
+                line_beg, line_end,
+                version_major, version_minor, status_code);
+        if (!status_line_size) {
+            boost::system::error_code ec{ss1x::errc::malformed_status_line};
+            this->set_error_code(ec);
             COLOG_TRIGER_ERROR("Connect to http proxy ", sss::raw_string(m_proxy_hostname),
                         ":", m_proxy_port, "error message ", err.message());
             return;
         }
         COLOG_TRIGER_DEBUG("proxy_status:http version: ", version_major, '.', version_minor);
+        m_response.consume(status_line_size);
 
         // TODO 按行拆分 proxy header 的处理
         boost::asio::async_read_until(
@@ -754,20 +782,20 @@ private:
             set_error_code(err);
             return;
         }
-        boost::system::error_code ec;
+
         // Process the response headers from proxy server.
         // std::istream response_stream(&m_response);
         m_response_headers.clear();
-        processHeader(m_response_headers, cast_string_view(m_response));
+        std::size_t raw_header_length{0};
+        processHeader(m_response_headers, cast_string_view(m_response), raw_header_length);
         // processHeader(m_response_headers, response_stream);
+
+        m_response.consume(raw_header_length);
 
         // Write whatever content we already have to output.
         if (m_response.size() > 0 && s_is_status_code_ok(this->header().status_code)) { // 200
             COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
             consume_content(m_response);
-        }
-        else {
-            discard(m_response);
         }
 
         COLOG_TRIGER_DEBUG("Connect to http proxy \'", m_proxy_hostname, ":", m_proxy_port, "\'.");
@@ -1004,26 +1032,27 @@ private:
             return;
         }
 
-        // 复制到新的streambuf中处理首行http状态, 如果不是http状态行, 那么将保
-        // 持m_response中的内容,这主要是为了兼容非标准http服务器直接向客户端发
-        // 送文件的需要, 但是依然需要以malformed_status_line通知用户,
+        // 非标准http服务器直接向客户端发送文件的需要, 但是依然需要以malformed_status_line通知用户,
         // malformed_status_line并不意味着连接关闭, 关于m_response中的数据如何
         // 处理, 由用户自己决定是否读取, 这时, 用户可以使用
         // read_some/async_read_some来读取这个链接上的所有数据.
-        boost::asio::streambuf tempbuf;
-        // int response_size = m_response.size();
-        boost::asio::buffer_copy(tempbuf.prepare(bytes_transferred), m_response.data());
-        tempbuf.commit(bytes_transferred);
-        COLOG_TRIGER_DEBUG(streambuf_view(tempbuf));
+
+        COLOG_TRIGER_DEBUG(streambuf_view(m_response));
+
+        const char* line_beg =
+            boost::asio::buffer_cast<const char*>(m_response.data());
+        const char* line_end = line_beg + m_response.size();
 
         // 检查http状态码, version_major和version_minor是http协议的版本号.
         int version_major = 0;
         int version_minor = 0;
-        int status_code = 0;
-        if (!detail::parse_http_status_line(
-                std::istreambuf_iterator<char>(&tempbuf),
-                std::istreambuf_iterator<char>(),
-                version_major, version_minor, status_code))
+        int status_code   = 0;
+        size_t status_line_size =
+            detail::parse_http_status_line(
+                line_beg, line_end, // in
+                version_major, version_minor, status_code); // out
+
+        if (status_code == 0)
         {
             COLOG_TRIGER_ERROR("Malformed status line");
             set_error_code(ss1x::errc::malformed_status_line);
@@ -1031,8 +1060,8 @@ private:
         }
         this->header().status_code = status_code;
 
-        COLOG_TRIGER_DEBUG(version_major, '.', version_minor, status_code);
-        discard(m_response, bytes_transferred);
+        COLOG_TRIGER_DEBUG(status_line_size, version_major, '.', version_minor, status_code);
+        discard(m_response, status_line_size);
 
         // NOTE
         //
@@ -1072,26 +1101,25 @@ private:
         }
     }
 
-    void processHeader(ss1x::http::Headers& headers, sss::string_view head_line_view)
+    size_t processHeaderOnce(ss1x::http::Headers& headers, sss::string_view head_line_view)
     {
-        RET_ON_STOP;
-        if (!head_line_view.empty() && !head_line_view.is_end_with("\r\n")) {
-            SSS_POSITION_THROW(std::runtime_error, "not end with \"\\r\\n\"");
-        }
         auto pos = 0;
-
-        while (!head_line_view.empty()) {
+        size_t raw_header_length = 0;
+        do {
             auto end_pos = head_line_view.find("\r\n", pos);
             if (end_pos == sss::string_view::npos) {
-                // NOTE someting wrong
+                this->set_error_code(ss1x::errc::malformed_status_line);
                 break;
             }
+
             auto line = head_line_view.substr(0, end_pos);
+            raw_header_length += line.size() + CRLF.size();
             if (line.empty()) {
-                // 说明，传入的是空行
+                // this means the last "\r\n" encountered
+                raw_header_length += CRLF.size();
                 break;
             }
-            head_line_view = head_line_view.substr(end_pos + 2);
+
             size_t colon_pos = line.find(':');
 
             if (colon_pos == std::string::npos) {
@@ -1105,7 +1133,7 @@ private:
             }
             // NOTE descard the last '\r'
             size_t len = line.length() - value_beg;
-            auto key = line.substr(0, colon_pos).to_string();
+            auto key   = line.substr(0, colon_pos).to_string();
             auto value = line.substr(value_beg, len).to_string();
             // NOTE 多值的key，通过"\r\n"为间隔，串接在一起。
             // TODO 或许，应该用vector来保存header；
@@ -1118,10 +1146,22 @@ private:
             headers[key].append(value);
 
             if (key == "Content-Length") {
-                m_response_content_length = sss::string_cast<uint32_t>(value);
+                m_content_to_read = sss::string_cast<uint32_t>(value);
             }
 
             COLOG_TRIGER_DEBUG(sss::raw_string(line));
+        } while(false);
+
+        return raw_header_length;
+    }
+
+    void processHeader(ss1x::http::Headers& headers, sss::string_view head_line_view, size_t& raw_header_length)
+    {
+        RET_ON_STOP;
+        while (!head_line_view.empty()) {
+            size_t cur_len = processHeaderOnce(headers, head_line_view);
+            raw_header_length += cur_len;
+            head_line_view = head_line_view.substr(cur_len);
         }
     }
 
@@ -1185,29 +1225,19 @@ private:
         //
         // 初始调用形如：
         //
-		// // 异步读取所有Http header部分.
-		// boost::asio::async_read_until(m_sock, m_response, "\r\n",
-		// 	boost::bind(&http_stream::handle_header<Handler>,
-		// 		this, handler, std::string(""),
-		// 		boost::asio::placeholders::bytes_transferred,
-		// 		boost::asio::placeholders::error
-		// 	)
-		// );
-        if (bytes_transferred > 2) {
-            auto line = cast_string_view(m_response).substr(0, bytes_transferred);
-            if (line.is_end_with("\r\n")) {
-                processHeader(m_response_headers, line);
-                m_response.consume(line.size());
-                // fall through
-            }
-            else if (line.is_end_with("\r")) {
-                boost::asio::async_read_until(
-                    m_socket, m_response, "\n",
-                    boost::bind(&proxy_tunnel_client::handle_read_header, this,
-                                boost::asio::placeholders::bytes_transferred,
-                                boost::asio::placeholders::error));
-                return;
-            }
+        // // 异步读取所有Http header部分.
+        // boost::asio::async_read_until(m_sock, m_response, "\r\n",
+        //  boost::bind(&http_stream::handle_header<Handler>,
+        //      this, handler, std::string(""),
+        //      boost::asio::placeholders::bytes_transferred,
+        //      boost::asio::placeholders::error
+        //  )
+        // );
+
+        auto line = cast_string_view(m_response);
+        if (!line.is_begin_with(CRLF)) {
+            auto header_len = processHeaderOnce(m_response_headers, line);
+            m_response.consume(header_len);
 
             boost::asio::async_read_until(
                 m_socket, m_response, "\r\n",
@@ -1217,17 +1247,10 @@ private:
             return;
             // NOTE 如果header的单行，都会"爆栈"，那么说明有"攻击"行为。
         }
-        else if (bytes_transferred < 2) {
-            COLOG_TRIGER_ERROR("left byts count :", bytes_transferred);
-            return;
-        }
 
-        // NOTE 此时 bytes_transferred == 2并且，response的buf中，必须为"\r\n"。
-        auto cr_nl = cast_string_view(m_response).substr(0, 2);
-        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(cr_nl));
-        m_response.consume(2);
+        m_response.consume(CRLF.size());
 
-        COLOG_TRIGER_DEBUG(m_response_headers);
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response_headers));
 
         // processResponseSetCookie(m_response_headers);
 
@@ -1266,8 +1289,8 @@ private:
             default:
                 // for 200,...206,400,403...
                 if (m_response_headers.has_kv("Transfer-Encoding", "chunked")) { // 将chunked处理，移动到跳转的后面
-                    this->m_chunked_transfer = true;
-                    COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
+                    this->m_is_chunked = true;
+                    COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_is_chunked));
                 }
                 break;
         }
@@ -1286,23 +1309,28 @@ private:
             }
         }
 
-        if (m_onContent && m_response_headers.has("Content-Encoding")) {
-            const auto& content_encoding = m_response_headers.get("Content-Encoding");
-            if (content_encoding == "gzip") {
-                m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_gzip));
-            }
-            else if (content_encoding == "zlib") {
-                m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_zlib));
-            }
-            else if (content_encoding == "deflate") {
-                m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_deflate));
-            }
-            else if (content_encoding == "br")
-            {
-                m_stream.reset(new ss1x::brstream);
+        if (m_onContent) {
+            if (m_response_headers.has("Content-Encoding")) {
+                const auto& content_encoding = m_response_headers.get("Content-Encoding");
+                if (content_encoding == "gzip") {
+                    m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_gzip));
+                }
+                else if (content_encoding == "zlib") {
+                    m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_zlib));
+                }
+                else if (content_encoding == "deflate") {
+                    m_stream.reset(new ss1x::gzstream(ss1x::gzstream::mt_deflate));
+                }
+                else if (content_encoding == "br")
+                {
+                    m_stream.reset(new ss1x::brstream);
+                }
+                else {
+                    COLOG_ERROR("not support Content-Encoding ", content_encoding);
+                }
             }
             else {
-                COLOG_ERROR("not support Content-Encoding ", content_encoding);
+                m_stream.reset(new ss1x::echostream);
             }
 
             if (m_stream) {
@@ -1310,9 +1338,9 @@ private:
             }
         }
 
-        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_chunked_transfer));
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_is_chunked));
 
-        if (m_chunked_transfer) {
+        if (m_is_chunked) {
             boost::asio::async_read_until(
                 m_socket, m_response, "\r\n",
                 boost::bind(&proxy_tunnel_client::handle_read_chunk_head, this,
@@ -1320,19 +1348,13 @@ private:
                             boost::asio::placeholders::error));
         }
         else {
+            COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
             // Write whatever content we already have to output.
-            if (m_response.size() && m_response_content_length != -1) {
-                m_response_content_length -= m_response.size();
-            }
-            if (m_response.size() > 0 && s_is_status_code_ok(this->header().status_code)) { // 200
-                COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
+            if (m_response.size() > 0) {
                 consume_content(m_response);
             }
-            else {
-                discard(m_response);
-            }
 
-            if (!m_response_content_length) {
+            if (!m_content_to_read) {
                 return;
             }
             // NOTE 如果正文过短的话，可能到这里，已经读完socket缓存了。
@@ -1345,48 +1367,57 @@ private:
         }
     }
 
+    // NOTE chunk head pattern: '\x'+ '\s'* '\r\n'
     void handle_read_chunk_head(int bytes_transferred, const boost::system::error_code& err)
     {
         RET_ON_STOP;
         COLOG_TRIGER_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
         if (bytes_transferred <= 0) {
+            auto sv = cast_string_view(m_response);
+            COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(sv));
             // NOTE hand-made eof mark
             set_error_code(boost::asio::error::eof);
             return;
         }
 
         int chunk_size = -1;
-        sss::string_view sv = cast_string_view(m_response).substr(0, bytes_transferred);
-        int offset = -1;
-        int ec = std::sscanf(sv.data(), "%x%n", &chunk_size, &offset);
-        if (ec != 1) {
+        int offset     = -1;
+        sss::string_view sv = cast_string_view(m_response);
+        if (std::isxdigit(sv.front()))
+        {
+            int ec = std::sscanf(sv.data(), "%x%n", &chunk_size, &offset);
+            if (ec != 1) {
+                SSS_POSITION_THROW(std::runtime_error,
+                                   "parse x-digit-number error: ",
+                                   sss::raw_string(sv));
+            }
+            // NOTE 标准允许chunk_size的16进制字符后面，跟若干padding用的空格字符！
+            while (sv[offset] == ' ')
+            {
+                ++offset;
+            }
+            sv = sv.substr(offset);
+            if (!sv.is_begin_with(CRLF))
+            {
+                SSS_POSITION_THROW(std::runtime_error,
+                                   "unexpect none-crlf trailing bytes: ",
+                                   sss::raw_string(sv));
+            }
+            sv.remove_prefix(CRLF.size());
+            offset += CRLF.size();
+        }
+        else
+        {
             SSS_POSITION_THROW(std::runtime_error,
                                "parse x-digit-number error: ",
                                sss::raw_string(sv));
         }
-        // NOTE 标准允许chunk_size的16进制字符后面，跟若干padding用的空格字符！
-        bool is_all_space =
-            sss::is_all(sv.data() + offset, sv.data() + bytes_transferred - 2,
-                        [](char ch) -> bool { return ch == ' '; });
-        if (!is_all_space) {
-            SSS_POSITION_THROW(std::runtime_error,
-                               "unexpect none-blankspace trailing byte: ",
-                               sss::raw_string(sss::string_view(
-                                   sv.data() + offset,
-                                   bytes_transferred - 2 - offset)));
-        }
 
-        bool is_end_with_crlf = sv.is_end_with("\r\n");
-        if (!is_end_with_crlf) {
-            SSS_POSITION_THROW(std::runtime_error,
-                               "unexpect none-crlf trailing bytes: ",
-                               sss::raw_string(sv));
-        }
-
-        m_chunk_size = chunk_size + 2;
-        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(chunk_size), " <- ", sss::raw_string(sv));
-        discard(m_response, bytes_transferred);
+        m_content_to_read = chunk_size + CRLF.size();
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(chunk_size), " <- ", sss::raw_string(cast_string_view(m_response).substr(0, offset)));
+        m_response.consume(offset);
         if (!chunk_size) {
+            consume_content(m_response, CRLF.size());
             COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(chunk_size));
             set_error_code(boost::asio::error::eof);
             return;
@@ -1400,7 +1431,7 @@ private:
         }
 
         boost::asio::async_read(
-            m_socket, m_response, boost::asio::transfer_exactly(m_chunk_size),
+            m_socket, m_response, boost::asio::transfer_exactly(m_content_to_read),
             boost::bind(&proxy_tunnel_client::handle_read_content, this,
                         boost::asio::placeholders::bytes_transferred,
                         boost::asio::placeholders::error));
@@ -1462,14 +1493,14 @@ private:
 
             // http://stackoverflow.com/questions/35387482/security-consequences-due-to-setting-set-verify-modeboostasiosslverify-n
             m_socket.get_ssl_socket().set_verify_mode(boost::asio::ssl::verify_none);
-			m_socket.get_ssl_socket().set_verify_callback(
-				boost::asio::ssl::rfc2818_verification(host), ec);
+            m_socket.get_ssl_socket().set_verify_callback(
+                boost::asio::ssl::rfc2818_verification(host), ec);
 
-			if (ec)
-			{
+            if (ec)
+            {
                 COLOG_TRIGER_ERROR("Set verify callback \'" , host, "\', error message \'" , ec.message() , "\'");
-				return;
-			}
+                return;
+            }
 #endif
 
         }
@@ -1540,81 +1571,60 @@ private:
     {
         RET_ON_STOP;
         COLOG_TRIGER_DEBUG(pretty_ec(err), bytes_transferred, "out of", m_response.size());
-        if (!bytes_transferred && int(m_response.size()) >= m_chunk_size)
-        {
-            COLOG_TRIGER_DEBUG("assgin bytes_transferred with m_chunk_size", bytes_transferred, m_chunk_size);
-            bytes_transferred = m_chunk_size;
-        }
+        assert(bytes_transferred >= 0);
 
-        if (bytes_transferred <= 0) {
-            // NOTE hand-made eof mark
-            set_error_code(boost::asio::error::eof);
-            return;
-        }
+        int bytes_available
+            = std::min<bytes_size_t>(m_response.size(), m_content_to_read);
 
-        // Write all of the data that has been read so far.
-        bool is_end = (!m_chunked_transfer &&
-                       (m_response_content_length == bytes_transferred ||
-                        this->is_end_chunk(m_response))) ||
-                      (m_chunked_transfer && !m_chunk_size);
+        // FIXME NOTE the ending CRLF!
         if (m_onContent && s_is_status_code_ok(this->header().status_code)) { // 200
-            consume_content(m_response, bytes_transferred);
+            consume_content(m_response, bytes_available);
         }
         else {
-            discard(m_response, bytes_transferred);
+            discard(m_response, bytes_available);
         }
-        //m_chunk_size -= bytes_transferred;
-        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()));
 
-        if (is_end) {
-            COLOG_TRIGER_DEBUG("is_end_chunk");
-            set_error_code(boost::asio::error::eof);
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_response.size()), pretty_ec(err), SSS_VALUE_MSG(m_is_chunked), SSS_VALUE_MSG(m_content_to_read));
+
+        if (err && err != boost::asio::error::eof) {
+            // NOTE boost::asio::error::eof 打印输出 asio.misc:2
+            set_error_code(err);
+        }
+
+        if (m_content_to_read > 0) {
+            boost::asio::async_read(
+                m_socket, m_response, boost::asio::transfer_at_least(1),
+                boost::bind(&proxy_tunnel_client::handle_read_content, this,
+                            boost::asio::placeholders::bytes_transferred,
+                            boost::asio::placeholders::error));
             return;
         }
 
-        if (err) {
-            // NOTE boost::asio::error::eof 打印输出 asio.misc:2
-            m_has_eof = (err == boost::asio::error::eof);
-            set_error_code(err);
-
-            if (m_has_eof && m_response.size())
-            {
-                // TODO FIXME
-                // NOTE 如果buffer中，还有数据没有处理完，但是流已经结束，应该怎么办？
-                // 没法再利用asio的异步机制了。
-                // 难道只能自己递归？堆叠函数？
-                // 还是说，
-                // 往已有的上述方法中，塞入一个eof的路径？
-            }
-            if (!m_chunk_size) {
-                return;
-            }
-            if (m_has_eof && m_chunk_size) {
-                if (m_onContent && s_is_status_code_ok(this->header().status_code)) { // 200
-                    consume_content(m_response, m_chunk_size);
-                }
-                else {
-                    discard(m_response);
-                }
-                // m_response.commit(m_chunk_size + 5);
-            }
+        if (m_is_chunked) {
+            COLOG_TRIGER_DEBUG("async_read chunk_head");
+            boost::asio::async_read_until(
+                m_socket, m_response, "\r\n",
+                boost::bind(&proxy_tunnel_client::handle_read_chunk_head, this,
+                            boost::asio::placeholders::bytes_transferred,
+                            boost::asio::placeholders::error));
+            return;
         }
 
+        // NOTE here means noting to do
+        set_error_code(boost::system::error_code{});
+
         // NOTE
-        // async_read_until，在当前buffer大小范围，如果都没有读取到终止标记串，
+        // async_read_until()，在当前buffer大小范围，如果都没有读取到终止标记串，
         // 则会返回 {asio.misc,3,"Element not found"} 这个错误号。
-        // 注意，此时bytes_transferred的值是0；但是 m_response.size()是有大小的，
-        // 而且，此时m_response是被塞满了的！
+        //
+        // 注意，此时 m_response.size() == m_response.max_size()
+        // 即，m_response 被塞满了！
+        //
         // 那么，如何安全地处理这种 async_read_until 动作呢？
         //
-        // 首先，我需要空出buffer，才能继续读，以便获得足够用来判断的数据。
-        // 此时，需要面对的另外一个问题是，如果标记字符串，恰好处于分割位置呢？
-        // 这样的话，安全的做法是，保留 【标记串长度-1】byte的数据，其他的转移出去。
-        // 再用同样的规则，继续读。
-        //
-        // 不过，这对于正则表达式的结束规则，就不好用了。此时最好的办法是，扩展
-        // 缓冲区，直到正则表达式可以匹配。——扩展缓冲区，就留下了一个用来攻击
-        // 的可能了。
+        // 首先，
+        // 1. 需要空出buffer，才能继续读，以便获得足够用来判断的数据。
+        // 2. 避免标记字符串，恰好处于分割位置；因为这样的话，将很难处理标记内存段的查找
         //
         // boost::asio::async_read_until(
         //     m_socket, m_response, "</html>",
@@ -1622,41 +1632,12 @@ private:
         //                 boost::asio::placeholders::bytes_transferred,
         //                 boost::asio::placeholders::error));
         //
-        // Continue reading remaining data until EOF.
+        // 此时，看结尾部分，是否含有标记字符串的前缀即可——如果，标记字符串的前缀，
+        // 就是当前 m_response 的结束部分，则有一定概率标记字符串被截断了；
         //
-        // NOTE
+        // 此时，应该让consume掉，除了前缀部分的数据，然后继续async_read_until()查找标记即可
         //
-        // async_read(sock, buffer(size), handler)是读满size字节再调用handdler；
-        // asycn_read_some() 是读读一点就调用；
-        // 那么async_read + boost::asio::transfer_at_least(1) 呢？
-        //
-        // 当然，遇到错误(包括eof)，都会调用……
-        if (m_chunked_transfer) {
-            if (m_chunk_size) {
-                boost::asio::async_read(
-                    m_socket, m_response, boost::asio::transfer_exactly(m_chunk_size),
-                    boost::bind(&proxy_tunnel_client::handle_read_content, this,
-                                boost::asio::placeholders::bytes_transferred,
-                                boost::asio::placeholders::error));
-            }
-            else {
-                boost::asio::async_read_until(
-                    m_socket, m_response, "\r\n",
-                    boost::bind(&proxy_tunnel_client::handle_read_chunk_head, this,
-                                boost::asio::placeholders::bytes_transferred,
-                                boost::asio::placeholders::error));
-            }
-        }
-        else {
-            if (!m_response_content_length) {
-                return;
-            }
-            boost::asio::async_read(
-                m_socket, m_response, boost::asio::transfer_at_least(1),
-                boost::bind(&proxy_tunnel_client::handle_read_content, this,
-                            boost::asio::placeholders::bytes_transferred,
-                            boost::asio::placeholders::error));
-        }
+        // 这样，就可以避免，在任意未知，切割标记字符串，问题得到了简化；
     }
 
     // void async_connect(const std::string& address, const std::string& port)
@@ -1745,91 +1726,71 @@ protected:
     void discard(boost::asio::streambuf& response, int bytes_transferred = 0)
     {
         if (bytes_transferred > 0) {
-            response.consume(std::min(response.size(), std::size_t(bytes_transferred)));
+            // NOTE boost::asio::streambuf{} will consume at most .size() count bytes from streambuf
+            response.consume(std::size_t(bytes_transferred));
         }
         else {
             response.consume(response.size());
         }
     }
+
+    // 
     void consume_content(boost::asio::streambuf& response, int bytes_transferred = 0)
     {
-        // NOTE m_chunk_size 包括了结尾的"\r\n"!
-        // 如果 bytes_transferred 正好等于 m_chunk_size，说明，这次刚好读到chunk结束
-        // 如果小于m_chunk_size，则都说明，还有数据。
+        // NOTE m_content_to_read 包括了结尾的"\r\n"!
+        // 如果 bytes_transferred 正好等于 m_content_to_read，说明，这次刚好读到chunk结束
+        // 如果小于m_content_to_read，则都说明，还有数据。
         // 并且，最后两个字节，需要忽略！
+        auto old_to_read = m_content_to_read;
         COLOG_TRIGER_DEBUG(bytes_transferred, "out of", response.size());
-        if (m_onContent) {
-            std::size_t size = response.size();
-            if (bytes_transferred > 0 && size > std::size_t(bytes_transferred)) {
-                size = bytes_transferred;
-            }
-            sss::string_view sv = cast_string_view(response).substr(0, size);
-            if (m_chunked_transfer) {
-                switch (m_chunk_size - bytes_transferred) {
-                    case 0:
-                        {
-                            int trail_len = std::min(2, bytes_transferred);
-                            sss::string_view trail(
-                                sss::string_view("\r\n").substr(2 - trail_len));
-                            if (!sv.is_end_with(trail)) {
-                                SSS_POSITION_THROW(std::runtime_error,
-                                                   "chunked data not end with ",
-                                                   sss::raw_string(trail), ", but ",
-                                                   sss::raw_string(sv));
-                            }
-                            sv.remove_suffix(trail_len);
-                            m_chunk_size = 0;
-                        }
-                        break;
 
-                    case 1:
-                        {
-                            int trail_len = std::min(1, bytes_transferred);
-                            sss::string_view trail(
-                                sss::string_view("\r\n").substr(2 - trail_len));
-                            if (!sv.is_end_with(trail)) {
-                                SSS_POSITION_THROW(std::runtime_error,
-                                                   "chunked data not end with ",
-                                                   sss::raw_string(trail), ", but ",
-                                                   sss::raw_string(sv), " while ",
-                                                   sss::raw_string(m_redirect_urls.back()));
-                            }
-                            sv.remove_suffix(trail_len);
-                            m_chunk_size = 1;
-                        }
-                        break;
-
-                    default:
-                        if (bytes_transferred > m_chunk_size) {
-                            SSS_POSITION_THROW(
-                                std::runtime_error,
-                                size_t(bytes_transferred), ">", m_chunk_size);
-                        }
-                        // bytes_transferred <= m_chunk_size - 2
-                        m_chunk_size -= bytes_transferred;
-                        COLOG_TRIGER_DEBUG("left ", m_chunk_size);
-                }
-            }
-            else {
-                if (m_response_content_length != -1) {
-                    m_response_content_length -= bytes_transferred;
-                }
-            }
-            if (m_stream) {
-                int ec = 0;
-                int covert_cnt = m_stream->inflate(sv, &ec);
-                if (ec < 0 && ec != Z_BUF_ERROR && covert_cnt <= 0) {
-                    COLOG_TRIGER_ERROR(SSS_VALUE_MSG(ec));
-                    SSS_POSITION_THROW(std::runtime_error, "inflate error!");
-                }
-            }
-            else {
-                m_onContent(sv);
-            }
-            response.consume(size);
+        std::size_t size = response.size();
+        if (bytes_transferred <= 0)
+        {
+            bytes_transferred = size;
         }
-        else {
-            discard(response, bytes_transferred);
+        else
+        {
+            bytes_transferred = std::min<size_t>(bytes_transferred, size);
+        }
+
+        bytes_transferred = std::min<size_t>(m_content_to_read, bytes_transferred);
+
+        if (m_onContent) {
+            sss::string_view sv = cast_string_view(response).substr(0, bytes_transferred);
+            if (m_is_chunked) {
+                if (m_content_to_read <= bytes_size_t(CRLF.size()))
+                {
+                    sv.remove_suffix(m_content_to_read);
+                }
+            }
+
+            assert(m_content_to_read >= bytes_transferred);
+            m_content_to_read -= bytes_transferred;
+
+            if (sv.size())
+            {
+                if (m_stream) {
+                    int ec = 0;
+                    int covert_cnt = m_stream->inflate(sv, &ec);
+                    if (ec && ec != Z_BUF_ERROR && covert_cnt <= 0) {
+                        COLOG_TRIGER_ERROR(SSS_VALUE_MSG(ec));
+                        SSS_POSITION_THROW(std::runtime_error, "inflate error!");
+                        //boost::system::error_code e;
+                        //set_error_code(boost::system::error_code(ec));
+                    }
+                }
+                else {
+                    m_onContent(sv);
+                }
+            }
+        }
+
+        response.consume(bytes_transferred);
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(old_to_read), SSS_VALUE_MSG(m_content_to_read), SSS_VALUE_MSG(bytes_transferred));
+        if (old_to_read == m_content_to_read)
+        {
+            SSS_POSITION_THROW(std::runtime_error, "");
         }
     }
 
@@ -1846,12 +1807,15 @@ protected:
 private:
     boost::asio::ip::tcp::resolver m_resolver;
     ss1x::detail::socket_t         m_socket;
+    // NOTE the other endpoint close the socket
+    // the response stream may still has byte to read
     bool                           m_has_eof;
     //! https://en.wikipedia.org/wiki/Chunked_transfer_encoding
     //! http://blog.csdn.net/whatday/article/details/7571451
-    bool                           m_chunked_transfer;
-    int32_t                        m_chunk_size;
-    int32_t                        m_response_content_length;
+    bool                           m_is_chunked;
+
+    // NOTE this means also chunked body size when `m_is_chunked == true`
+    bytes_size_t                   m_content_to_read;
     // 最大跳转次数
     // 0 表示，不允许跳转；
     // 1 表示可以跳转一次；以此类推
@@ -1865,7 +1829,6 @@ private:
 
     boost::asio::deadline_timer    m_deadline;
 
-    // TODO 也许，应该将header分开,request,response
     // 不过，对于header()函数来说，用户一般只关心response的header。
     ss1x::http::Headers            m_response_headers;
     ss1x::http::Headers            m_request_headers;
