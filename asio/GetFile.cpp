@@ -201,7 +201,7 @@ void getFileInner(std::ostream& outFile, ss1x::http::Headers* headers,
     bool use_ssl = (port == 443);
     if (use_ssl) {
         p_ctx.reset(
-            new boost::asio::ssl::context(boost::asio::ssl::context::sslv23));
+            new boost::asio::ssl::context(boost::asio::ssl::context::tls_client));
         p_ctx->set_default_verify_paths();
     }
 
@@ -426,7 +426,7 @@ boost::system::error_code redirectHttpPostCookie(
     CookieFunc_t&&             cookieFun,
     const ss1x::http::Headers& request_header)
 {
-    boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
+    boost::asio::ssl::context ctx(boost::asio::ssl::context::tls_client);
     ctx.set_default_verify_paths();
     auto url_info = ss1x::util::url::split_port_auto(url);
 
@@ -487,7 +487,7 @@ boost::system::error_code redirectHttpGetCookie(std::ostream& out,
                                                 CookieFunc_t&& cookieFun,
                                                 const ss1x::http::Headers& request_header)
 {
-    boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
+    boost::asio::ssl::context ctx(boost::asio::ssl::context::tls_client);
     ctx.set_default_verify_paths();
     auto url_info = ss1x::util::url::split_port_auto(url);
 
@@ -535,7 +535,7 @@ boost::system::error_code proxyRedirectHttpGetCookie(
     CookieFunc_t&& cookieFun, const ss1x::http::Headers& request_header)
 {
     // TODO 可以用跟踪法，看看avhttp，是如何使用proxy的。
-    boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
+    boost::asio::ssl::context ctx(boost::asio::ssl::context::tls_client);
     ctx.set_default_verify_paths();
     auto url_info = ss1x::util::url::split_port_auto(url);
 
@@ -596,7 +596,7 @@ boost::system::error_code proxyRedirectHttpPostCookie(
     CookieFunc_t&& cookieFun, const ss1x::http::Headers& request_header)
 {
     // TODO 可以用跟踪法，看看avhttp，是如何使用proxy的。
-    boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
+    boost::asio::ssl::context ctx(boost::asio::ssl::context::tls_client);
     ctx.set_default_verify_paths();
     auto url_info = ss1x::util::url::split_port_auto(url);
 
