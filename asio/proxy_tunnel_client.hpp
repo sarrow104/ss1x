@@ -1498,6 +1498,26 @@ private:
             boost::system::error_code ec;
             std::string host = std::get<1>(ss1x::util::url::split_port_auto(get_url()));
 
+            // boost::asio::ssl::context::no_tlsv1;
+            // ssl::context ssl_context_{ssl::context::tls};
+            // ssl_context_.set_default_verify_paths();
+            // ssl_context_.add_verify_path("/opt/misc/certificates");
+            //
+            //! https://github.com/encode/httpx/issues/646
+            //context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+            // context.options |= ssl.OP_NO_SSLv2
+            // context.options |= ssl.OP_NO_SSLv3
+            // context.options |= ssl.OP_NO_TLSv1
+            // context.options |= ssl.OP_NO_TLSv1_1
+            // context.options |= ssl.OP_NO_COMPRESSION
+            // context.set_ciphers(DEFAULT_CIPHERS)
+            //
+            //! trouble-shooting wrong version number
+            // https://github.com/openssl/openssl/issues/6289
+            // curl -v https://testnet.binance.vision/api/v3/exchangeInfo
+            //
+            // NOTE this site use tls version 1.3!
+
             // http://stackoverflow.com/questions/35387482/security-consequences-due-to-setting-set-verify-modeboostasiosslverify-n
             m_socket.get_ssl_socket().set_verify_mode(boost::asio::ssl::verify_none);
             m_socket.get_ssl_socket().set_verify_callback(
@@ -1590,6 +1610,7 @@ private:
             consume_content(m_response, bytes_available);
         }
         else {
+            // NOTE this will discard data from 404 response
             discard(m_response, bytes_available);
         }
 
@@ -1733,9 +1754,11 @@ protected:
     {
         if (bytes_transferred > 0) {
             // NOTE boost::asio::streambuf{} will consume at most .size() count bytes from streambuf
+            m_content_to_read -= bytes_transferred;
             response.consume(std::size_t(bytes_transferred));
         }
         else {
+            m_content_to_read -= response.size();
             response.consume(response.size());
         }
     }
