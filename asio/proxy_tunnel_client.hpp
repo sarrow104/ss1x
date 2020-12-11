@@ -45,7 +45,7 @@ inline sss::string_view cast_string_view(const boost::asio::streambuf& streambuf
     return sss::string_view(boost::asio::buffer_cast<const char*>(streambuf.data()), streambuf.size());
 }
 
-//this->m_deadline.cancel(); 
+//this->m_deadline.cancel();
 //m_deadline.expires_from_now(boost::posix_time::seconds(5));
 #define RET_ON_STOP  do { \
     if (m_stoped) {\
@@ -55,6 +55,22 @@ inline sss::string_view cast_string_view(const boost::asio::streambuf& streambuf
         this->resetTimer(); \
     }\
 } while(false);
+
+namespace ss1x {
+namespace asio {
+
+enum resource_type {
+    res_type_any,
+    res_type_json,
+    res_type_xml,
+    res_type_text,
+    res_type_html,
+    res_type_app,   // for binary data; eg.
+    res_type_image, // for all image
+};
+
+} // namespace asio
+} // namespace ss1x
 
 namespace detail {
 
@@ -79,7 +95,7 @@ static const sss::string_view CRLF{"\r\n"};
 static const sss::string_view CRLF2{"\r\n" "\r\n"};
 
 // NOTE 不定参数宏传递
-// #define func(args...) inner_call(##args) 
+// #define func(args...) inner_call(##args)
 // 是gnu写法，过时了。
 // 标准写法是... -> __VA_ARGS__
 #define COLOG_TRIGER_INFO(...) \
@@ -385,6 +401,7 @@ public:
           m_socket(io_service),
           m_has_eof(false),
           m_is_chunked(false),
+          m_expect_res_type(ss1x::asio::res_type_any),
           m_content_to_read(0),
           m_max_redirect(5),
           m_stoped(false),
@@ -428,7 +445,9 @@ public:
     void                    max_redirect(int mr)               { if (mr >= 0) { m_max_redirect = mr; } }
 
 
-    void http_get(const std::string& url)
+    void http_get(
+        const std::string& url,
+        ss1x::asio::resource_type expect_type = ss1x::asio::res_type_any)
     {
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(url));
         m_method = method_t(method_t::E_GET);
@@ -438,8 +457,10 @@ public:
         http_get_impl();
     }
 
-    void ssl_tunnel_get(const std::string& proxy_domain, int proxy_port,
-                        const std::string& url)
+    void ssl_tunnel_get(
+        const std::string& proxy_domain, int proxy_port,
+        const std::string& url,
+        ss1x::asio::resource_type expect_type = ss1x::asio::res_type_any)
     {
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(proxy_domain), SSS_VALUE_MSG(proxy_port), SSS_VALUE_MSG(url), SSS_VALUE_MSG(m_request_headers));
 
@@ -452,7 +473,9 @@ public:
         ssl_tunnel_get_impl();
     }
 
-    void http_post(const std::string& url, const std::string& content)
+    void http_post(
+        const std::string& url,
+        const std::string& content)
     {
         m_method = method_t(method_t::E_POST);
         this->initUrl(url);
@@ -462,8 +485,11 @@ public:
         http_get_impl();
     }
 
-    void ssl_tunnel_post(const std::string& proxy_domain, int proxy_port,
-                        const std::string& url, const std::string& content)
+    void ssl_tunnel_post(
+        const std::string& proxy_domain, int proxy_port,
+        const std::string& url,
+        const std::string& content,
+        ss1x::asio::resource_type expect_type = ss1x::asio::res_type_any)
     {
         m_method = method_t(method_t::E_POST);
         this->initUrl(url);
@@ -948,7 +974,18 @@ private:
         // 比如img的话，就获取
         // Accept: image/webp,image/*,*/*;q=0.8
         // 当然，禁用，也是一个选择。
-        requestStreamHelper(used_field, m_request_headers, request_stream, "Accept", "text/html, application/xhtml+xml, */*");
+        const char * accept_type = "text/html, application/xhtml+xml, */*";
+        switch (m_expect_res_type)
+        {
+            case ss1x::asio::res_type_any:   accept_type = "*/*";                        break;
+            case ss1x::asio::res_type_json:  accept_type = "application/json, */*";      break;
+            case ss1x::asio::res_type_app:   accept_type = "application/xhtml+xml, */*"; break;
+            case ss1x::asio::res_type_html:  accept_type = "text/html, */*";             break;
+            case ss1x::asio::res_type_text:  accept_type = "text/plain, */*";            break;
+            case ss1x::asio::res_type_image: accept_type = "image/webp, */*";            break;
+        }
+        requestStreamHelper(used_field, m_request_headers, request_stream, "Accept", accept_type);
+
         // NOTE 部分网站，比如 http://i.imgur.com/lYQgi0R.gif 必须要提供 (Accept-Encoding "gzip, deflate, sdch") 参数；
         // 不然，无法正常从图床获取图片，而是给你一个frame，再显示图片。
         // requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "gzip, deflate, sdch");
@@ -957,7 +994,7 @@ private:
         // NOTE 2019-10-04 `sdch' is for developed by google, and supported by chrome only; so ...
         // https://www.cnblogs.com/xingzc/p/9082035.html
         // https://cloud.tencent.com/developer/section/1189886
-        requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "br, gzip, deflate");
+        requestStreamHelper(used_field, m_request_headers, request_stream, "Accept-Encoding", "gzip, deflate, br");
 
         if (m_request_headers.has("Referer")) {
             requestStreamHelper(used_field, m_request_headers, request_stream, "Referer", "");
@@ -1739,6 +1776,7 @@ protected:
     {
         m_redirect_urls.push_back(url);
         m_url_info = ss1x::util::url::split_port_auto(url);
+        COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(m_url_info));
     }
 
     void set_error_code(const boost::system::error_code& ec) {
@@ -1763,7 +1801,7 @@ protected:
         }
     }
 
-    // 
+    //
     void consume_content(boost::asio::streambuf& response, int bytes_transferred = 0)
     {
         // NOTE m_content_to_read 包括了结尾的"\r\n"!
@@ -1854,6 +1892,7 @@ private:
     //! https://en.wikipedia.org/wiki/Chunked_transfer_encoding
     //! http://blog.csdn.net/whatday/article/details/7571451
     bool                           m_is_chunked;
+    ss1x::asio::resource_type      m_expect_res_type;
 
     // NOTE this means also chunked body size when `m_is_chunked == true`
     bytes_size_t                   m_content_to_read;
