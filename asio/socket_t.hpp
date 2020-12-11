@@ -14,6 +14,7 @@
 
 namespace ss1x {
 namespace detail {
+
 template <typename T>
 constexpr T const& constexpr_max(T const& a, T const& b)
 {
@@ -22,19 +23,19 @@ constexpr T const& constexpr_max(T const& a, T const& b)
 
 struct socket_t {
 private:
-    enum status_t { st_NONE, st_NORMAL, st_SSL };
-
-    status_t m_status;
-
     typedef boost::asio::ip::tcp::socket basic_socket_t;
     // typedef boost::asio::ssl::stream<boost_socket_t> ssl_socket_t;
     typedef boost::asio::ssl::stream<basic_socket_t&> ssl_socket_t;
+
     basic_socket_t m_socket;
     std::unique_ptr<ssl_socket_t> m_ssl_stream;
     std::mutex m_socket_lock;
     bool m_endable_ssl;
 
 public:
+    // NOTE higher version of boost::asio need this typedef(eg. 1.74)
+    typedef boost::asio::ip::tcp::socket::lowest_layer_type::executor_type executor_type;
+
     explicit socket_t(boost::asio::io_service& io_service)
         : m_socket(io_service), m_endable_ssl(true)
     {
