@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8) 	# must surply this !
 add_definitions(-std=c++11)
 add_definitions(-fPIC)
-add_definitions(-W -fexceptions -Wunused-variable -Wfatal-errors)
+add_definitions(-W -fexceptions -Wunused-variable -Wfatal-errors -Werror=return-type -Wall)
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
 	# http://stackoverflow.com/questions/22140520/how-to-enable-assert-in-cmake-release-mode
