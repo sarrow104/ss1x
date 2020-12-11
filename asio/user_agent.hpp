@@ -1,7 +1,7 @@
 #pragma once
 namespace ss1x {
 namespace http {
-static const char * user_agent_firefox = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:67.0) Gecko/20100101 Firefox/67.0";
+static const char * user_agent_firefox = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:83.0) Gecko/20100101 Firefox/83.0";
 // "Mozilla/5.0 (Windows; U; Windows NT 5.1; zh-CN; rv:1.9.1.6) Gecko/20091201 Firefox/3.5.6"
 
 #define USER_AGENT_DEFAULT  ss1x::http::user_agent_firefox
