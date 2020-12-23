@@ -55,7 +55,7 @@ public:
     bool has_kv(const std::string& key, const std::string& value) const
     {
         auto it = this->BaseT::find(key);
-        
+
         return it != this->BaseT::end() && it->second == value;
     }
 
