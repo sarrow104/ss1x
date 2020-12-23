@@ -451,6 +451,7 @@ public:
     {
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(url));
         m_method = method_t(method_t::E_GET);
+        m_expect_res_type = expect_type;
         this->initUrl(url);
         // m_redirect_urls.resize(0);
         // m_redirect_urls.push_back(url);
@@ -465,6 +466,7 @@ public:
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(proxy_domain), SSS_VALUE_MSG(proxy_port), SSS_VALUE_MSG(url), SSS_VALUE_MSG(m_request_headers));
 
         m_method = method_t(method_t::E_GET);
+        m_expect_res_type = expect_type;
         this->initUrl(url);
         // m_redirect_urls.resize(0);
         // m_redirect_urls.push_back(url);
@@ -492,6 +494,7 @@ public:
         ss1x::asio::resource_type expect_type = ss1x::asio::res_type_any)
     {
         m_method = method_t(method_t::E_POST);
+        m_expect_res_type = expect_type;
         this->initUrl(url);
         // m_redirect_urls.resize(0);
         // m_redirect_urls.push_back(url);
@@ -797,6 +800,7 @@ private:
     void handle_https_proxy_header(Stream & sock, int bytes_transferred, const boost::system::error_code& err)
     {
         RET_ON_STOP;
+        (void)sock;
         COLOG_TRIGER_DEBUG(SSS_VALUE_MSG(bytes_transferred), pretty_ec(err));
         if (err)
         {
@@ -979,7 +983,8 @@ private:
         {
             case ss1x::asio::res_type_any:   accept_type = "*/*";                        break;
             case ss1x::asio::res_type_json:  accept_type = "application/json, */*";      break;
-            case ss1x::asio::res_type_app:   accept_type = "application/xhtml+xml, */*"; break;
+            case ss1x::asio::res_type_app:
+            case ss1x::asio::res_type_xml:   accept_type = "application/xhtml+xml, */*"; break;
             case ss1x::asio::res_type_html:  accept_type = "text/html, */*";             break;
             case ss1x::asio::res_type_text:  accept_type = "text/plain, */*";            break;
             case ss1x::asio::res_type_image: accept_type = "image/webp, */*";            break;
@@ -1634,6 +1639,7 @@ private:
     void handle_read_content(int bytes_transferred, const boost::system::error_code& err)
     {
         RET_ON_STOP;
+        (void)bytes_transferred;
 
         assert(bytes_transferred >= 0);
 
